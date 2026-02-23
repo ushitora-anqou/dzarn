@@ -1,0 +1,3 @@
+(executable
+ (name main)
+ (libraries dzarn logs logs.fmt cmdliner))

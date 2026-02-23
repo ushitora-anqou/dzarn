@@ -1,0 +1,5 @@
+(tests
+ (names test_dzarn)
+ (libraries alcotest dzarn logs)
+ (preprocess
+  (pps ppx_string_interpolation)))
