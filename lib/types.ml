@@ -1,0 +1,15 @@
+(* Location information *)
+type loc = { file : string; line : int; column : int }
+
+(* Function identifier *)
+type func_id = { module_name : string; name : string; loc : loc }
+
+(* Function definition *)
+type func_def = { id : func_id; is_public : bool; source_file : string }
+
+(* Analysis result *)
+type result = { unused_functions : func_def list }
+
+(* Complexity result *)
+type complexity_issue = { id : func_id; complexity : int; source_file : string }
+type complexity_result = { complex_functions : complexity_issue list }
