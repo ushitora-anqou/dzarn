@@ -20,15 +20,24 @@ let default =
 
 let parse_file filename =
   let ic = open_in filename in
-  let rec read_all acc =
+  let buf = Buffer.create 4096 in
+  let rec read_all () =
     try
       let line = input_line ic in
-      read_all (acc ^ line ^ "\n")
-    with End_of_file -> acc
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n';
+      read_all ()
+    with End_of_file -> ()
   in
-  let content = read_all "" in
-  close_in ic;
-  (* Parse using sexplib *)
-  t_of_sexp (Sexplib.Sexp.of_string content)
+  (* Protect against resource leaks *)
+  try
+    read_all ();
+    close_in ic;
+    let content = Buffer.contents buf in
+    (* Parse using sexplib *)
+    t_of_sexp (Sexplib.Sexp.of_string content)
+  with e ->
+    close_in ic;
+    raise e
 
 let parse_string content = t_of_sexp (Sexplib.Sexp.of_string content)

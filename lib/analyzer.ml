@@ -338,12 +338,14 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
   let contains_substring s sub =
     let sub_len = String.length sub in
     let s_len = String.length s in
-    let rec check i =
-      if i + sub_len > s_len then false
-      else if String.sub s i sub_len = sub then true
-      else check (i + 1)
-    in
-    check 0
+    if sub_len = 0 then true
+    else
+      let rec check i =
+        if i + sub_len > s_len then false
+        else if String.sub s i sub_len = sub then true
+        else check (i + 1)
+      in
+      check 0
   in
 
   (* Also check if function name appears in its source file (excluding definition line) *)
@@ -353,27 +355,26 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
     if StringSet.mem def.id.name used_names then true
     else
       (* Check if name appears elsewhere in the file *)
-      try
-        let lines =
-          let ic = open_in def.source_file in
-          let rec read_lines acc =
-            try
-              let line = input_line ic in
-              read_lines (line :: acc)
-            with End_of_file -> acc
-          in
+      let ic = open_in def.source_file in
+      let rec read_lines acc =
+        try
+          let line = input_line ic in
+          read_lines (line :: acc)
+        with End_of_file -> acc
+      in
+      let lines =
+        try
           let result = read_lines [] in
           close_in ic;
           List.rev result
-        in
-        (* Check if function name appears in any line except its definition line *)
-        let appears_elsewhere =
-          List.mapi (fun i line -> (i + 1, line)) lines
-          |> List.exists (fun (line_num, line) ->
-              line_num <> def.id.loc.line && contains_substring line def.id.name)
-        in
-        appears_elsewhere
-      with _ -> false
+        with e ->
+          close_in ic;
+          raise e
+      in
+      (* Check if function name appears in any line except its definition line *)
+      List.mapi (fun i line -> (i + 1, line)) lines
+      |> List.exists (fun (line_num, line) ->
+          line_num <> def.id.loc.line && contains_substring line def.id.name)
   in
 
   List.filter (fun def -> not (is_used_in_file def)) functions
