@@ -1,6 +1,7 @@
 # AGENTS.md
 
-- When using libraries, always use the `context7 tool` to verify the latest usage instructions while writing code.
+- You're not familiar with OCaml programming. Always use google to verify its syntax and semantics.
+- When using standard and thirdparty libraries, always use google to verify the latest usage instructions while writing code.
 - You must always check the current content of a file before editing it.
 - Before completing each task, you must verify that the results are as expected.
 - Do not ignore errors and proceed to the next task. You must resolve any errors before moving forward.
