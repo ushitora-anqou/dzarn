@@ -365,6 +365,20 @@ let test_all_ast_nodes () =
   (* We just want to ensure parsing succeeded *)
   ()
 
+(* Test 16: Qualified module calls - Module.function syntax *)
+(* Bug: qualified calls like A.func incorrectly mark top-level 'func' as used *)
+let test_qualified_module_call () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "qualified_module_call.ml"
+    (Filename.concat tmp_dir "qualified_module_call.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* The top-level 'record' and 'helper' should be reported as unused *)
+  (* because A.record and B.helper are calls to local modules, not top-level *)
+  if string_contains output "Unused function 'record'" then
+    if string_contains output "Unused function 'helper'" then ()
+    else failwith "helper should be reported as unused"
+  else failwith "record should be reported as unused"
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -401,4 +415,7 @@ let () =
         [ test_case "OCaml 5+ effect handlers" `Quick test_effect_handlers ] );
       ( "All AST nodes",
         [ test_case "complete Parsetree coverage" `Quick test_all_ast_nodes ] );
+      ( "Qualified module calls",
+        [ test_case "Module.function syntax" `Quick test_qualified_module_call ]
+      );
     ]

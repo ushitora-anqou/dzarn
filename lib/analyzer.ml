@@ -18,6 +18,14 @@ end
 
 module UsageSet = Set.Make (UsagePair)
 
+(* Convert Longident.t to string representation *)
+(* Longident.t = Lident of string | Ldot of t loc * string loc | Lapply of t * t *)
+let rec longident_to_string = function
+  | Lident s -> s
+  | Ldot ({ txt = prefix; _ }, { txt = s; _ }) ->
+      longident_to_string prefix ^ "." ^ s
+  | Lapply _ -> ""
+
 (* File discovery *)
 let find_ocaml_files dir =
   let files = ref [] in
@@ -191,17 +199,20 @@ let rec collect_expr usages mod_name file = function
   | {
       pexp_desc =
         Pexp_ident
-          { txt = Ldot ({ txt = _prefix; _ }, { txt = func_name; _ }); _ };
+          { txt = Ldot ({ txt = prefix; _ }, { txt = func_name; _ }); _ };
       _;
     } ->
       (* Qualified call: Module.func or A.B.func *)
-      (* We track just the function name since cross-module calls are common *)
+      (* Extract the actual module path from the qualified identifier *)
+      let actual_module = longident_to_string prefix in
+      (* Track the usage with the actual module being called, not current module *)
+      (* This prevents A.func from incorrectly marking current module's func as used *)
       usages :=
         {
           id =
             {
-              module_name = mod_name;
-              (* Keep current module for context *)
+              module_name = actual_module;
+              (* Use the actual module being called *)
               name = func_name;
               loc = { file; line = 0; column = 0 };
             };
@@ -326,35 +337,23 @@ let collect_usages files =
 (* Find unused functions *)
 let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
     : Types.func_def list =
-  (* Collect function names that are used in expressions *)
-  let used_names =
+  (* Collect (module_name, function_name) pairs that are used in expressions *)
+  let used_pairs =
     List.fold_left
-      (fun (acc : StringSet.t) (usage : Types.func_def) ->
-        StringSet.add usage.Types.id.name acc)
-      StringSet.empty usages
+      (fun (acc : UsageSet.t) (usage : Types.func_def) ->
+        UsageSet.add (usage.Types.id.module_name, usage.Types.id.name) acc)
+      UsageSet.empty usages
   in
 
-  (* Helper function to check if string contains substring *)
-  let contains_substring s sub =
-    let sub_len = String.length sub in
-    let s_len = String.length s in
-    if sub_len = 0 then true
-    else
-      let rec check i =
-        if i + sub_len > s_len then false
-        else if String.sub s i sub_len = sub then true
-        else check (i + 1)
-      in
-      check 0
-  in
-
-  (* Also check if function name appears in its source file (excluding definition line) *)
+  (* Check if function name appears in its source file (excluding definition line) *)
   (* This catches functions used in patterns/attributes that aren't tracked in exprs *)
   let is_used_in_file (def : Types.func_def) =
-    (* First check if used in expressions *)
-    if StringSet.mem def.id.name used_names then true
+    (* First check if used in expressions with matching module and name *)
+    if UsageSet.mem (def.id.module_name, def.id.name) used_pairs then true
     else
-      (* Check if name appears elsewhere in the file *)
+      (* Fallback: check if name appears elsewhere in the file *)
+      (* This catches cases not tracked by AST traversal (e.g., some patterns) *)
+      (* We need to exclude qualified calls like Module.func *)
       let ic = open_in def.source_file in
       let rec read_lines acc =
         try
@@ -371,10 +370,67 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
           close_in ic;
           raise e
       in
-      (* Check if function name appears in any line except its definition line *)
+      (* Check if function name appears unqualified in the file *)
+      (* An unqualified use is: "name", "(name", "; name", etc. *)
+      (* A qualified use like "Module.name" should NOT count *)
+      (* Also exclude 'let name = ...' lines which are definitions, not uses *)
+      let name = def.id.name in
+      let name_len = String.length name in
+      let is_this_function_definition line =
+        (* Check if this line defines 'name' (i.e., "let name = ...") *)
+        let rec skip_spaces i =
+          if i >= String.length line then false
+          else
+            match String.get line i with
+            | ' ' | '\t' -> skip_spaces (i + 1)
+            | _ -> (
+                (* Check if the line starts with "let " *)
+                let line_len = String.length line in
+                line_len >= i + 4
+                && String.sub line i 4 = "let "
+                &&
+                (* Check if "let " is followed by the function name *)
+                let name_start = i + 4 in
+                line_len >= name_start + name_len
+                && String.sub line name_start name_len = name
+                &&
+                (* Check that the name is followed by a space or special char *)
+                let name_end = name_start + name_len in
+                name_end >= line_len
+                ||
+                match String.get line name_end with
+                | ' ' | '\t' | '=' -> true
+                | _ -> false)
+        in
+        skip_spaces 0
+      in
       List.mapi (fun i line -> (i + 1, line)) lines
       |> List.exists (fun (line_num, line) ->
-          line_num <> def.id.loc.line && contains_substring line def.id.name)
+          if line_num = def.id.loc.line || is_this_function_definition line then
+            false
+          else
+            (* Check each position in the line *)
+            let line_len = String.length line in
+            let rec check_pos pos =
+              if pos + name_len > line_len then false
+              else if String.sub line pos name_len = name then
+                (* Check the character before the match *)
+                let is_unqualified =
+                  if pos = 0 then true
+                    (* At start of line, check that it's not followed by a dot *)
+                  else
+                    match String.get line (pos - 1) with
+                    | ' ' | '(' | ')' | ';' | '=' | ':' | '{' | '}' | '[' | ']'
+                    | ',' | '\t' | '\n' ->
+                        true
+                    | '.' ->
+                        false (* This is a qualified call like Module.name *)
+                    | _ -> false (* Preceded by an identifier character *)
+                in
+                if is_unqualified then true else check_pos (pos + 1)
+              else check_pos (pos + 1)
+            in
+            check_pos 0)
   in
 
   List.filter (fun def -> not (is_used_in_file def)) functions
