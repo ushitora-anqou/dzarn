@@ -537,6 +537,19 @@ let run ~fix ~config dir =
         Printf.printf "Fixed %d file(s).\n" (List.length by_file);
         flush stdout));
 
+    (* Run naming checker if enabled *)
+    if config.Config.naming_enabled then (
+      let violations = Naming.collect_naming_violations parse_ml_file files in
+      if violations = [] then
+        Printf.printf "No naming convention violations found.\n"
+      else (
+        Naming.report_naming_violations violations;
+        exit_code := 1);
+      flush stdout)
+    else
+      (* If naming is not enabled, print a message *)
+      Printf.printf "Naming checking disabled.\n";
+
     (* Run complexity checker if enabled *)
     if config.Config.complexity_enabled then (
       let complexities =

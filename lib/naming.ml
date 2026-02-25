@@ -1,0 +1,235 @@
+(* Naming convention linter *)
+
+open Types
+open Stdlib
+open Parsetree
+
+(* Check if a character is uppercase *)
+let is_uppercase c = 'A' <= c && c <= 'Z'
+
+(* Check if a character is lowercase *)
+let is_lowercase c = 'a' <= c && c <= 'z'
+
+(* Check if a character is valid in snake_case (lowercase, digit, or underscore) *)
+let is_snake_char c = is_lowercase c || ('0' <= c && c <= '9') || c = '_'
+
+(* Check if a string is lowercase snake_case *)
+let is_lowercase_snake_case s =
+  if String.length s = 0 then false
+  else
+    let first = s.[0] in
+    (* First char must be lowercase letter *)
+    if not (is_lowercase first) then false
+    else
+      (* All chars must be snake_case chars *)
+      let rec check i =
+        if i >= String.length s then true
+        else if is_snake_char s.[i] then check (i + 1)
+        else false
+      in
+      check 0
+
+(* Check if a string is uppercase snake_case (first char uppercase, rest snake_case) *)
+let is_uppercase_snake_case s =
+  if String.length s = 0 then false
+  else
+    let first = s.[0] in
+    (* First char must be uppercase letter *)
+    if not (is_uppercase first) then false
+    else
+      (* All chars must be snake_case chars (lowercase, digit, underscore) *)
+      let rec check i =
+        if i >= String.length s then true
+        else if is_snake_char s.[i] then check (i + 1)
+        else false
+      in
+      check 1
+(* Skip first char since we already validated it *)
+
+(* Helper to create a naming violation *)
+let make_violation name loc violation_type file =
+  { name; loc; violation_type; source_file = file }
+
+(* Check if a name is private (starts with underscore) *)
+let is_private_name name = String.length name > 0 && name.[0] = '_'
+
+(* Check pattern for naming violations (variables, function parameters) *)
+let rec check_pattern violations file = function
+  | { ppat_desc = Ppat_var { txt = name; _ }; ppat_loc = loc; _ } ->
+      (* Skip private names *)
+      if not (is_private_name name) then
+        (* Check if variable name is lowercase snake_case *)
+        if not (is_lowercase_snake_case name) then
+          let loc =
+            {
+              file = loc.loc_start.pos_fname;
+              line = loc.loc_start.pos_lnum;
+              column = loc.loc_start.pos_cnum - loc.loc_start.pos_bol;
+            }
+          in
+          violations :=
+            make_violation name loc
+              "variable/function name should be lowercase snake_case" file
+            :: !violations
+  | { ppat_desc = Ppat_alias (pat, { txt = name; _ }); _ } ->
+      (* Skip private names *)
+      if not (is_private_name name) then
+        (* Check alias names *)
+        if not (is_lowercase_snake_case name) then (
+          let loc =
+            {
+              file = pat.ppat_loc.loc_start.pos_fname;
+              line = pat.ppat_loc.loc_start.pos_lnum;
+              column =
+                pat.ppat_loc.loc_start.pos_cnum - pat.ppat_loc.loc_start.pos_bol;
+            }
+          in
+          violations :=
+            make_violation name loc "alias name should be lowercase snake_case"
+              file
+            :: !violations;
+          check_pattern violations file pat)
+        else check_pattern violations file pat
+      else check_pattern violations file pat
+  (* Skip other pattern types for simplicity *)
+  | _ -> ()
+
+(* Check expression for function parameters in lambdas *)
+let rec check_expression violations file = function
+  | { pexp_desc = Pexp_function (_, _, body); _ } -> (
+      match body with
+      | Pfunction_body e -> check_expression violations file e
+      | Pfunction_cases (cases, _, _) ->
+          List.iter
+            (fun c ->
+              check_pattern violations file c.pc_lhs;
+              Option.iter (check_expression violations file) c.pc_guard;
+              check_expression violations file c.pc_rhs)
+            cases)
+  | { pexp_desc = Pexp_match (e, cases); _ } ->
+      check_expression violations file e;
+      List.iter
+        (fun c ->
+          check_pattern violations file c.pc_lhs;
+          Option.iter (check_expression violations file) c.pc_guard;
+          check_expression violations file c.pc_rhs)
+        cases
+  | { pexp_desc = Pexp_try (e, cases); _ } ->
+      check_expression violations file e;
+      List.iter
+        (fun c ->
+          check_pattern violations file c.pc_lhs;
+          Option.iter (check_expression violations file) c.pc_guard;
+          check_expression violations file c.pc_rhs)
+        cases
+  | { pexp_desc = Pexp_let (_, bindings, e); _ } ->
+      List.iter
+        (fun binding ->
+          check_pattern violations file binding.pvb_pat;
+          check_expression violations file binding.pvb_expr)
+        bindings;
+      check_expression violations file e
+  | { pexp_desc = Pexp_letmodule (_, _, e); _ } ->
+      check_expression violations file e
+  | { pexp_desc = Pexp_letexception (_, e); _ } ->
+      check_expression violations file e
+  | { pexp_desc = Pexp_ifthenelse (e1, e2, e3); _ } ->
+      check_expression violations file e1;
+      check_expression violations file e2;
+      Option.iter (check_expression violations file) e3
+  | { pexp_desc = Pexp_sequence (e1, e2); _ } ->
+      check_expression violations file e1;
+      check_expression violations file e2
+  | { pexp_desc = Pexp_while (e1, e2); _ } ->
+      check_expression violations file e1;
+      check_expression violations file e2
+  | { pexp_desc = Pexp_for (_, _, _, _, e); _ } ->
+      check_expression violations file e
+  | { pexp_desc = Pexp_apply (e, args); _ } ->
+      check_expression violations file e;
+      List.iter (fun (_, arg) -> check_expression violations file arg) args
+  | { pexp_desc = Pexp_tuple el; _ } ->
+      List.iter (fun (_, e) -> check_expression violations file e) el
+  | { pexp_desc = Pexp_array el; _ } ->
+      List.iter (check_expression violations file) el
+  | { pexp_desc = Pexp_record (fields, _); _ } ->
+      List.iter (fun (_, expr) -> check_expression violations file expr) fields
+  | { pexp_desc = Pexp_field (e, _); _ } -> check_expression violations file e
+  | { pexp_desc = Pexp_setfield (e1, _, e2); _ } ->
+      check_expression violations file e1;
+      check_expression violations file e2
+  | { pexp_desc = Pexp_construct (_, Some e); _ } ->
+      check_expression violations file e
+  | { pexp_desc = Pexp_construct (_, None); _ } -> ()
+  | { pexp_desc = Pexp_assert e; _ } -> check_expression violations file e
+  | { pexp_desc = Pexp_lazy e; _ } -> check_expression violations file e
+  | { pexp_desc = Pexp_poly (e, _); _ } -> check_expression violations file e
+  | { pexp_desc = Pexp_open (_, e); _ } -> check_expression violations file e
+  | { pexp_desc = Pexp_send (e, _); _ } -> check_expression violations file e
+  (* Skip other expression types *)
+  | _ -> ()
+
+(* Check type declaration for variant constructor names *)
+let check_type_decl violations file
+    ({ ptype_kind; _ } : Parsetree.type_declaration) =
+  match ptype_kind with
+  | Ptype_variant constructors ->
+      List.iter
+        (fun ({ pcd_name = { txt = ctor_name; _ }; pcd_loc; _ } :
+               Parsetree.constructor_declaration) ->
+          (* Check if variant constructor name is uppercase snake_case *)
+          if not (is_uppercase_snake_case ctor_name) then
+            let loc =
+              {
+                file = pcd_loc.loc_start.pos_fname;
+                line = pcd_loc.loc_start.pos_lnum;
+                column = pcd_loc.loc_start.pos_cnum - pcd_loc.loc_start.pos_bol;
+              }
+            in
+            violations :=
+              make_violation ctor_name loc
+                "variant constructor should be uppercase snake_case" file
+              :: !violations)
+        constructors
+  | Ptype_record _ ->
+      (* Record fields are typically lowercase, but we check them as variables *)
+      ()
+  | Ptype_open -> ()
+  | Ptype_abstract -> ()
+
+(* Check structure item for naming violations *)
+let check_structure_item violations file = function
+  | { pstr_desc = Pstr_value (_, bindings); _ } ->
+      List.iter
+        (fun binding ->
+          check_pattern violations file binding.pvb_pat;
+          check_expression violations file binding.pvb_expr)
+        bindings
+  | { pstr_desc = Pstr_type (_, type_decls); _ } ->
+      List.iter (check_type_decl violations file) type_decls
+  | _ -> ()
+
+(* Skip other structure item types *)
+(* Skip other structure item types *)
+
+(* Collect all naming violations from files *)
+let collect_naming_violations parse_ml files =
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
+  let violations = ref [] in
+  List.iter
+    (fun file ->
+      match parse_ml file with
+      | Error _ -> ()
+      | Ok ast -> List.iter (check_structure_item violations file) ast)
+    ml_files;
+  List.rev !violations
+
+(* Report naming violations *)
+let report_naming_violations violations =
+  List.iter
+    (fun violation ->
+      Printf.printf "Naming violation: %s at %s:%d:%d\n%s\n" violation.name
+        violation.source_file violation.loc.line violation.loc.column
+        violation.violation_type)
+    violations;
+  flush stdout

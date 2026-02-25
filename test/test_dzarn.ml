@@ -379,6 +379,52 @@ let test_qualified_module_call () =
     else failwith "helper should be reported as unused"
   else failwith "record should be reported as unused"
 
+(* Test 17: Naming convention violations *)
+let test_naming_violations () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "naming_violations.ml"
+    (Filename.concat tmp_dir "naming_violations.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Should detect camelCase function name *)
+  if string_contains output "camelCase" then ()
+  else failwith "Expected camelCase to be reported as naming violation";
+  (* Should detect pascalCase function name *)
+  if string_contains output "pascalCase" then ()
+  else failwith "Expected pascalCase to be reported";
+  (* Should detect mixedCase function name *)
+  if string_contains output "mixedCase" then ()
+  else failwith "Expected mixedCase to be reported";
+  (* Should detect anotherBadOne function name *)
+  if string_contains output "anotherBadOne" then ()
+  else failwith "Expected anotherBadOne to be reported";
+  (* Should detect CamelCaseVariant variant name (not uppercase snake_case) *)
+  if string_contains output "CamelCaseVariant" then ()
+  else failwith "Expected CamelCaseVariant to be reported";
+  (* Should detect badLocal local variable name *)
+  if string_contains output "badLocal" then ()
+  else failwith "Expected badLocal to be reported"
+
+(* Test 18: Valid naming conventions *)
+let test_naming_valid () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "naming_valid.ml" (Filename.concat tmp_dir "naming_valid.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Should report no naming violations *)
+  if string_contains output "No naming convention violations found" then ()
+  else failwith "Expected no naming violations"
+
+(* Test 19: Naming with unused function (combined linters) *)
+let test_naming_with_unused () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "naming_violations.ml"
+    (Filename.concat tmp_dir "naming_violations.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Should report both naming violations AND unused function *)
+  if string_contains output "CamelCase" then
+    if string_contains output "unused_naming_function" then ()
+    else failwith "Expected unused_naming_function to be reported"
+  else failwith "Expected CamelCase to be reported as naming violation"
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -418,4 +464,10 @@ let () =
       ( "Qualified module calls",
         [ test_case "Module.function syntax" `Quick test_qualified_module_call ]
       );
+      ( "Naming convention violations",
+        [ test_case "detects bad names" `Quick test_naming_violations ] );
+      ( "Valid naming",
+        [ test_case "accepts good names" `Quick test_naming_valid ] );
+      ( "Combined linters",
+        [ test_case "naming with unused" `Quick test_naming_with_unused ] );
     ]

@@ -13,3 +13,13 @@ type result = { unused_functions : func_def list }
 (* Complexity result *)
 type complexity_issue = { id : func_id; complexity : int; source_file : string }
 type complexity_result = { complex_functions : complexity_issue list }
+
+(* Naming convention result *)
+type naming_violation = {
+  name : string;
+  loc : loc;
+  violation_type : string;
+  source_file : string;
+}
+
+type naming_result = { violations : naming_violation list }
