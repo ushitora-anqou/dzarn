@@ -2,8 +2,8 @@
 
 open Types
 open Stdlib
-open Parsetree
-open Location
+open Ppxlib.Parsetree
+open Ppxlib.Location
 
 (* Calculate line count of an expression from its location *)
 let line_count_of_expr expr =
@@ -97,9 +97,7 @@ let rec find_nested_bindings mod_name file results expr =
         (fun (_, arg) -> find_nested_bindings mod_name file results arg)
         args
   | Pexp_tuple items ->
-      List.iter
-        (fun (_, e) -> find_nested_bindings mod_name file results e)
-        items
+      List.iter (find_nested_bindings mod_name file results) items
   | Pexp_array items ->
       List.iter (find_nested_bindings mod_name file results) items
   | Pexp_record (fields, _) ->
@@ -133,7 +131,7 @@ let collect_length parse_ml module_name files =
       | Result.Ok ast ->
           let mod_name = module_name file in
           List.iter
-            (fun (item : Parsetree.structure_item) ->
+            (fun item ->
               match item.pstr_desc with
               | Pstr_value (_, bindings) ->
                   (* Process top-level bindings *)

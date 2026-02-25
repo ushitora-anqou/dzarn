@@ -2,7 +2,8 @@
 
 open Types
 open Stdlib
-open Parsetree
+open Ppxlib.Parsetree
+open Ppxlib.Location
 
 (* Calculate cyclomatic complexity of an expression *)
 (* Base complexity is 1, additional complexity for decision points *)
@@ -11,7 +12,7 @@ let rec complexity_of_expr = function
       match payload with Some e -> complexity_of_expr e | None -> 1)
   | { pexp_desc = Pexp_tuple items; _ } ->
       (* Tuple doesn't add complexity *)
-      List.fold_left (fun acc (_, e) -> max acc (complexity_of_expr e)) 1 items
+      List.fold_left (fun acc e -> max acc (complexity_of_expr e)) 1 items
   | { pexp_desc = Pexp_record (fields, _); _ } ->
       (* Record doesn't add complexity *)
       List.fold_left
@@ -157,8 +158,8 @@ let collect_complexity parse_ml module_name files =
   List.iter
     (fun file ->
       match parse_ml file with
-      | Error _ -> ()
-      | Ok ast ->
+      | Result.Error _ -> ()
+      | Result.Ok ast ->
           let mod_name = module_name file in
           List.iter
             (fun item ->

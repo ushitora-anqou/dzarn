@@ -2,6 +2,6 @@
  (name dzarn)
  (public_name dzarn)
  (inline_tests)
- (libraries logs compiler-libs.common sexplib)
+ (libraries logs ppxlib sexplib)
  (preprocess
   (pps ppx_deriving.std ppx_expect ppx_inline_test ppx_sexp_conv)))

@@ -1,29 +1,44 @@
 open Types
-open Stdlib
 open Lexing
-open Parsetree
-open Longident
-open Location
+open Ppxlib.Parsetree
+open Ppxlib.Longident
+open Ppxlib.Location
+module Parse = Ppxlib.Parse
+module List = Stdlib.List
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module Array = Stdlib.Array
 
-(* String set module *)
-module StringSet = Set.Make (String)
+(* String set module - use String directly as key *)
+module String_set_key = struct
+  type t = string
+
+  let compare = Stdlib.String.compare
+end
+
+module StringSet = Stdlib.Set.Make (String_set_key)
+
+(* String map module *)
+module StringMap = Stdlib.Map.Make (String_set_key)
 
 (* Module for (module_name, function_name) pairs *)
 module UsagePair = struct
   type t = string * string
 
   let compare (m1, f1) (m2, f2) =
-    match String.compare m1 m2 with 0 -> String.compare f1 f2 | c -> c
+    match Stdlib.String.compare m1 m2 with
+    | 0 -> Stdlib.String.compare f1 f2
+    | c -> c
 end
 
-module UsageSet = Set.Make (UsagePair)
+module UsageSet = Stdlib.Set.Make (UsagePair)
 
 (* Convert Longident.t to string representation *)
 (* Longident.t = Lident of string | Ldot of t loc * string loc | Lapply of t * t *)
-let rec longident_to_string = function
+let rec longident_to_string : Longident.t -> string = function
   | Lident s -> s
-  | Ldot ({ txt = prefix; _ }, { txt = s; _ }) ->
-      longident_to_string prefix ^ "." ^ s
+  | Ldot (prefix_loc, s_loc) ->
+      longident_to_string prefix_loc.txt ^ "." ^ s_loc.txt
   | Lapply _ -> ""
 
 (* File discovery *)
@@ -61,30 +76,36 @@ let loc_of_location location =
     column = location.loc_start.pos_cnum - location.loc_start.pos_bol;
   }
 
-(* AST parsing *)
+(* AST parsing using ppxlib *)
 let parse_ml_file filename =
-  let ic = open_in_bin filename in
   try
-    let lexbuf = Lexing.from_channel ic in
-    lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = filename };
+    let code =
+      let ic = open_in_bin filename in
+      let len = in_channel_length ic in
+      let s = Bytes.create len in
+      really_input ic s 0 len;
+      close_in ic;
+      Bytes.to_string s
+    in
+    let lexbuf = Lexing.from_string code in
     let ast = Parse.implementation lexbuf in
-    close_in ic;
     Ok ast
-  with e ->
-    close_in ic;
-    Error e
+  with e -> Error e
 
 let parse_mli_file filename =
-  let ic = open_in_bin filename in
   try
-    let lexbuf = Lexing.from_channel ic in
-    lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = filename };
+    let code =
+      let ic = open_in_bin filename in
+      let len = in_channel_length ic in
+      let s = Bytes.create len in
+      really_input ic s 0 len;
+      close_in ic;
+      Bytes.to_string s
+    in
+    let lexbuf = Lexing.from_string code in
     let ast = Parse.interface lexbuf in
-    close_in ic;
     Ok ast
-  with e ->
-    close_in ic;
-    Error e
+  with e -> Error e
 
 (* Check if a name is private (starts with underscore) *)
 let is_private_name name = String.length name > 0 && name.[0] = '_'
@@ -98,7 +119,6 @@ let module_name_of_file file =
 (* Collect public function signatures from .mli files *)
 let collect_mli_signatures mli_files =
   (* Returns a map from module name to set of public function names *)
-  let module StringMap = Map.Make (String) in
   let sigs = ref StringMap.empty in
   List.iter
     (fun file ->
@@ -123,7 +143,6 @@ let collect_mli_signatures mli_files =
 (* Function definition collector - simple traversal *)
 let collect_function_definitions files =
   let functions = ref [] in
-  let module StringMap = Map.Make (String) in
   let mli_files = List.filter (fun f -> Filename.check_suffix f ".mli") files in
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let mli_sigs = collect_mli_signatures mli_files in
@@ -138,13 +157,13 @@ let collect_function_definitions files =
           if has_mli then Some (StringMap.find mod_name mli_sigs) else None
         in
         List.iter
-          (fun (item : Parsetree.structure_item) ->
+          (fun (item : structure_item) ->
             match item.pstr_desc with
-            | Parsetree.Pstr_value (_, bindings) ->
+            | Pstr_value (_, bindings) ->
                 List.iter
                   (fun binding ->
                     match binding.pvb_pat.ppat_desc with
-                    | Parsetree.Ppat_var { txt = name; _ } ->
+                    | Ppat_var { txt = name; _ } ->
                         let is_public =
                           match mod_sigs with
                           | Some sigs -> StringSet.mem name sigs
@@ -171,9 +190,10 @@ let collect_function_definitions files =
   List.iter process_file ml_files;
   List.rev !functions
 
-(* Usage tracker - simple recursive traversal *)
-let rec collect_expr usages mod_name file = function
-  | { pexp_desc = Pexp_ident { txt = Lident name; _ }; _ } ->
+(* Helper to process identifier and record usage *)
+let process_ident usages mod_name file longident =
+  match longident with
+  | { txt = Lident name; _ } ->
       (* Direct call: f *)
       (* Skip common operators and builtins *)
       if
@@ -196,57 +216,84 @@ let rec collect_expr usages mod_name file = function
             source_file = file;
           }
           :: !usages
-  | {
-      pexp_desc =
-        Pexp_ident
-          { txt = Ldot ({ txt = prefix; _ }, { txt = func_name; _ }); _ };
-      _;
-    } ->
+  | { txt = Ldot _; _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      (* Extract the actual module path from the qualified identifier *)
-      let actual_module = longident_to_string prefix in
-      (* Track the usage with the actual module being called, not current module *)
-      (* This prevents A.func from incorrectly marking current module's func as used *)
-      usages :=
-        {
-          id =
-            {
-              module_name = actual_module;
-              (* Use the actual module being called *)
-              name = func_name;
-              loc = { file; line = 0; column = 0 };
-            };
-          is_public = true;
-          source_file = file;
-        }
-        :: !usages
-  | { pexp_desc = Pexp_tuple el; _ } ->
-      List.iter (fun (_, e) -> collect_expr usages mod_name file e) el
-  | { pexp_desc = Pexp_construct (_, Some e); _ } ->
-      collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_construct (_, None); _ } -> ()
-  | { pexp_desc = Pexp_variant (_, Some e); _ } ->
-      collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_record (fields, _); _ } ->
+      (* Use Location to extract the text and parse it *)
+      let longident_text =
+        let start = longident.loc.loc_start in
+        let end_ = longident.loc.loc_end in
+        (* Read from file to get the actual text *)
+        let ic = open_in file in
+        try
+          (* Seek to start position *)
+          for _i = 1 to start.pos_lnum - 1 do
+            ignore (input_line ic)
+          done;
+          (* Read the line and extract the identifier *)
+          let line = input_line ic in
+          let start_col = start.pos_cnum - start.pos_bol in
+          let end_col = end_.pos_cnum - end_.pos_bol in
+          let text = Stdlib.String.sub line start_col (end_col - start_col) in
+          close_in ic;
+          text
+        with _ ->
+          close_in ic;
+          (* Fallback to empty string if there's an error *)
+          ""
+      in
+      (* Parse the longident text to get module and function name *)
+      let last_dot_index =
+        let rec find_from i =
+          if i < 0 then -1
+          else if longident_text.[i] = '.' then i
+          else find_from (i - 1)
+        in
+        find_from (Stdlib.String.length longident_text - 1)
+      in
+      if last_dot_index >= 0 then
+        let actual_module = Stdlib.String.sub longident_text 0 last_dot_index in
+        let func_name =
+          Stdlib.String.sub longident_text (last_dot_index + 1)
+            (Stdlib.String.length longident_text - last_dot_index - 1)
+        in
+        (* Track the usage with the actual module being called *)
+        usages :=
+          {
+            id =
+              {
+                module_name = actual_module;
+                name = func_name;
+                loc = { file; line = 0; column = 0 };
+              };
+            is_public = true;
+            source_file = file;
+          }
+          :: !usages
+  | { txt = Lapply _; _ } -> ()
+
+(* Usage tracker - simple recursive traversal *)
+let rec collect_expr usages mod_name file (expr : expression) : unit =
+  match expr.pexp_desc with
+  | Pexp_ident longident -> process_ident usages mod_name file longident
+  | Pexp_tuple el -> List.iter (fun e -> collect_expr usages mod_name file e) el
+  | Pexp_construct (_, Some e) -> collect_expr usages mod_name file e
+  | Pexp_construct (_, None) -> ()
+  | Pexp_variant (_, Some e) -> collect_expr usages mod_name file e
+  | Pexp_record (fields, _) ->
       (* Process record field values *)
-      (* fields is (string loc * expression) list *)
-      List.iter
-        (fun (_label, expr) -> collect_expr usages mod_name file expr)
-        fields
-  | { pexp_desc = Pexp_array el; _ } ->
-      List.iter (collect_expr usages mod_name file) el
-  | { pexp_desc = Pexp_sequence (e1, e2); _ } ->
+      List.iter (fun (_, expr) -> collect_expr usages mod_name file expr) fields
+  | Pexp_array el -> List.iter (collect_expr usages mod_name file) el
+  | Pexp_sequence (e1, e2) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2
-  | { pexp_desc = Pexp_while (e1, e2); _ } ->
+  | Pexp_while (e1, e2) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2
-  | { pexp_desc = Pexp_for (_, _, _, _, e); _ } ->
-      collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_let (_, ebs, e); _ } ->
+  | Pexp_for (_, _, _, _, e) -> collect_expr usages mod_name file e
+  | Pexp_let (_, ebs, e) ->
       List.iter (fun eb -> collect_expr usages mod_name file eb.pvb_expr) ebs;
       collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_function (_, _, body); _ } -> (
+  | Pexp_function (_, _, body) -> (
       match body with
       | Pfunction_body e -> collect_expr usages mod_name file e
       | Pfunction_cases (cases, _, _) ->
@@ -255,14 +302,14 @@ let rec collect_expr usages mod_name file = function
               Option.iter (collect_expr usages mod_name file) c.pc_guard;
               collect_expr usages mod_name file c.pc_rhs)
             cases)
-  | { pexp_desc = Pexp_apply (e, args); _ } ->
+  | Pexp_apply (e, args) ->
       collect_expr usages mod_name file e;
       List.iter (fun (_, arg) -> collect_expr usages mod_name file arg) args
-  | { pexp_desc = Pexp_ifthenelse (e1, e2, e3); _ } ->
+  | Pexp_ifthenelse (e1, e2, e3) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2;
       Option.iter (collect_expr usages mod_name file) e3
-  | { pexp_desc = Pexp_try (e, cases); _ } ->
+  | Pexp_try (e, cases) ->
       (* try...with and effect handlers: process the body and all handler cases *)
       collect_expr usages mod_name file e;
       List.iter
@@ -270,30 +317,28 @@ let rec collect_expr usages mod_name file = function
           Option.iter (collect_expr usages mod_name file) c.pc_guard;
           collect_expr usages mod_name file c.pc_rhs)
         cases
-  | { pexp_desc = Pexp_field (e, _); _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_setfield (e1, _, e2); _ } ->
+  | Pexp_field (e, _) -> collect_expr usages mod_name file e
+  | Pexp_setfield (e1, _, e2) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2
-  | { pexp_desc = Pexp_send (e, _); _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_new _; _ } -> ()
-  | { pexp_desc = Pexp_letmodule (_, _, e); _ } ->
-      collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_letexception (_, e); _ } ->
-      collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_assert e; _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_lazy e; _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_poly (e, _); _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_object _; _ } ->
+  | Pexp_send (e, _) -> collect_expr usages mod_name file e
+  | Pexp_new _ -> ()
+  | Pexp_letmodule (_, _, e) -> collect_expr usages mod_name file e
+  | Pexp_letexception (_, e) -> collect_expr usages mod_name file e
+  | Pexp_assert e -> collect_expr usages mod_name file e
+  | Pexp_lazy e -> collect_expr usages mod_name file e
+  | Pexp_poly (e, _) -> collect_expr usages mod_name file e
+  | Pexp_object _ ->
       (* Skip class internals for now *)
       ()
-  | { pexp_desc = Pexp_pack _; _ } ->
+  | Pexp_pack _ ->
       (* Skip module pack for now *)
       ()
-  | { pexp_desc = Pexp_letop _; _ } -> ()
-  | { pexp_desc = Pexp_constant _; _ } -> ()
-  | { pexp_desc = Pexp_open (_, e); _ } -> collect_expr usages mod_name file e
-  | { pexp_desc = Pexp_extension (_, _); _ } -> ()
-  | { pexp_desc = Pexp_unreachable; _ } -> ()
+  | Pexp_letop _ -> ()
+  | Pexp_constant _ -> ()
+  | Pexp_open (_, e) -> collect_expr usages mod_name file e
+  | Pexp_extension (_, _) -> ()
+  | Pexp_unreachable -> ()
   | _ -> ()
 
 let rec collect_structure usages mod_name file = function
@@ -447,11 +492,11 @@ let report_unused (unused : Types.func_def list) : unit =
 (* Print AST back to source *)
 let print_structure out_channel ast =
   let pp = Format.formatter_of_out_channel out_channel in
-  Pprintast.structure pp ast
+  Ppxlib.Pprintast.structure pp ast
 
 (* Remove unused functions - simple recursive filtering *)
-let remove_unused_functions (unused : Types.func_def list)
-    (ast : Parsetree.structure) : Parsetree.structure =
+let remove_unused_functions (unused : Types.func_def list) (ast : structure) :
+    structure =
   let unused_set =
     List.fold_left
       (fun acc (def : Types.func_def) -> StringSet.add def.Types.id.name acc)
@@ -493,7 +538,7 @@ let apply_fix (file : string) (unused : Types.func_def list) : unit =
       (* Write back to file *)
       let oc = open_out file in
       let pp = Format.formatter_of_out_channel oc in
-      Pprintast.structure pp new_ast;
+      Ppxlib.Pprintast.structure pp new_ast;
       Format.pp_print_flush pp ();
       close_out oc
 

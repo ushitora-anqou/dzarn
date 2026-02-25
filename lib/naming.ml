@@ -2,8 +2,8 @@
 
 open Types
 open Stdlib
-open Parsetree
-open Location
+open Ppxlib.Parsetree
+open Ppxlib.Location
 
 (* Check if a character is uppercase *)
 let is_uppercase c = 'A' <= c && c <= 'Z'
@@ -169,7 +169,7 @@ let rec check_expression violations file = function
       check_expression violations file e;
       List.iter (fun (_, arg) -> check_expression violations file arg) args
   | { pexp_desc = Pexp_tuple el; _ } ->
-      List.iter (fun (_, e) -> check_expression violations file e) el
+      List.iter (fun e -> check_expression violations file e) el
   | { pexp_desc = Pexp_array el; _ } ->
       List.iter (check_expression violations file) el
   | { pexp_desc = Pexp_record (fields, _); _ } ->
@@ -194,13 +194,12 @@ let rec check_expression violations file = function
   | _ -> ()
 
 (* Check type declaration for variant constructor names *)
-let check_type_decl violations file
-    ({ ptype_kind; _ } : Parsetree.type_declaration) =
+let check_type_decl violations file ({ ptype_kind; _ } : type_declaration) =
   match ptype_kind with
   | Ptype_variant constructors ->
       List.iter
         (fun ({ pcd_name = { txt = ctor_name; _ }; pcd_loc; _ } :
-               Parsetree.constructor_declaration) ->
+               constructor_declaration) ->
           (* Check if variant constructor name is uppercase snake_case *)
           if not (is_uppercase_snake_case ctor_name) then
             let loc =
