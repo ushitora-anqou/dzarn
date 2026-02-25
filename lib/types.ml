@@ -23,3 +23,7 @@ type naming_violation = {
 }
 
 type naming_result = { violations : naming_violation list }
+
+(* Function length result *)
+type length_issue = { id : func_id; line_count : int; source_file : string }
+type length_result = { long_functions : length_issue list }

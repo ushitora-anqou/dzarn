@@ -9,6 +9,8 @@ type t = {
   complexity_enabled : bool;
   complexity_threshold : int;
   naming_enabled : bool;
+  length_enabled : bool;
+  length_threshold : int;
 }
 [@@deriving sexp]
 
@@ -18,6 +20,8 @@ let default =
     complexity_enabled = true;
     complexity_threshold = 10;
     naming_enabled = true;
+    length_enabled = true;
+    length_threshold = 50;
   }
 
 let parse_file filename =

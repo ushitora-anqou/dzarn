@@ -1,6 +1,6 @@
 # dzarn
 
-A static analysis tool for OCaml 5.4+ that detects unused public functions, checks cyclomatic complexity, and enforces naming conventions.
+A static analysis tool for OCaml 5.4+ that detects unused public functions, checks cyclomatic complexity, enforces naming conventions, and checks function length.
 
 ## Features
 
@@ -19,6 +19,11 @@ A static analysis tool for OCaml 5.4+ that detects unused public functions, chec
   - Variant constructors: `Uppercase_snake_case`
   - Exceptions: `Uppercase_snake_case`
   - Checks function parameters, lambda parameters, and local variables
+
+- **Function Length Checker** - Identifies overly long functions
+  - Configurable line count threshold (default: 50)
+  - Detects both top-level and nested functions
+  - Helps identify functions that may benefit from refactoring
 
 ## Installation
 
@@ -67,7 +72,9 @@ Configure dzarn using a sexp-format configuration file (default: `dzarn.sexp`):
 ((unused_enabled true)
  (complexity_enabled true)
  (complexity_threshold 10)
- (naming_enabled true))
+ (naming_enabled true)
+ (length_enabled true)
+ (length_threshold 50))
 ```
 
 **Configuration options:**
@@ -78,6 +85,8 @@ Configure dzarn using a sexp-format configuration file (default: `dzarn.sexp`):
 | `complexity_enabled` | bool | `true` | Enable/disable complexity checking |
 | `complexity_threshold` | int | `10` | Complexity threshold for reporting |
 | `naming_enabled` | bool | `true` | Enable/disable naming convention checking |
+| `length_enabled` | bool | `true` | Enable/disable function length checking |
+| `length_threshold` | int | `50` | Maximum number of lines before reporting |
 
 ### Output Examples
 
@@ -86,6 +95,7 @@ $ dzarn src/
 Unused function 'helper' in src/util.ml:42
 Unused function 'old_api' in src/api.ml:15
 Function 'complex_func' has complexity 15 (threshold: 10) in src/lib.ml:50
+Function 'long_function' has 75 lines (threshold: 50) in src/processor.ml:120
 Naming violation: camelCase at src/utils.ml:5:4
 variable/function name should be lowercase snake_case
 Naming violation: `bad_variant at src/types.ml:12:20
@@ -152,6 +162,42 @@ Functions exceeding the threshold are reported with their complexity score:
 
 ```ocaml
 Function 'complex_func' has complexity 15 (threshold: 10) in src/lib.ml:50
+```
+
+## Function Length Checker
+
+The length checker identifies functions that exceed a configurable line count threshold.
+
+### How Line Count is Calculated
+
+The line count is calculated from the function's definition start line to the end of its expression. This includes:
+
+- Top-level functions defined with `let`
+- Nested functions defined within `let ... in` expressions
+- All lines between the start and end of the function's body
+
+**Note:** For functions containing nested functions, the outer function's line count includes the lines of all nested functions. This is intentional - functions that contain many nested definitions are often candidates for refactoring.
+
+### Example
+
+```ocaml
+(* This function is 12 lines long *)
+let process_data input =
+  let step1 x =
+    let _ = x + 1 in
+    let _ = x + 2 in
+    let _ = x + 3 in
+    let _ = x + 4 in
+    let _ = x + 5 in
+    x
+  in
+  step1 input
+```
+
+With `length_threshold = 10`, this would report:
+```
+Function 'process_data' has 12 lines (threshold: 10) in src/file.ml:1
+Function 'step1' has 10 lines (threshold: 10) in src/file.ml:2
 ```
 
 ## Naming Convention Linter

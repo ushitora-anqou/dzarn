@@ -102,48 +102,51 @@ let rec complexity_of_expr = function
   | _ -> 1
 
 (* Calculate complexity of a structure item *)
-let complexity_of_structure_item mod_name file item =
+let complexity_of_structure_item mod_name file item :
+    Types.complexity_issue list =
   match item.pstr_desc with
   | Pstr_value (_, bindings) ->
       List.map
         (fun binding ->
           match binding.pvb_pat.ppat_desc with
           | Ppat_var { txt = name; _ } ->
-              {
-                id =
-                  {
-                    Types.module_name = mod_name;
-                    name;
-                    loc =
-                      {
-                        Types.file;
-                        line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
-                        column =
-                          binding.pvb_pat.ppat_loc.loc_start.pos_cnum
-                          - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
-                      };
-                  };
-                complexity = complexity_of_expr binding.pvb_expr;
-                source_file = file;
-              }
+              ({
+                 id =
+                   {
+                     Types.module_name = mod_name;
+                     name;
+                     loc =
+                       {
+                         Types.file;
+                         line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
+                         column =
+                           binding.pvb_pat.ppat_loc.loc_start.pos_cnum
+                           - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
+                       };
+                   };
+                 complexity = complexity_of_expr binding.pvb_expr;
+                 source_file = file;
+               }
+                : Types.complexity_issue)
           | _ ->
-              {
-                id =
-                  {
-                    Types.module_name = mod_name;
-                    name = "<unknown>";
-                    loc =
-                      {
-                        Types.file;
-                        line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
-                        column =
-                          binding.pvb_pat.ppat_loc.loc_start.pos_cnum
-                          - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
-                      };
-                  };
-                complexity = complexity_of_expr binding.pvb_expr;
-                source_file = file;
-              })
+              ({
+                 id =
+                   {
+                     Types.module_name = mod_name;
+                     name = "<unknown>";
+                     loc =
+                       {
+                         Types.file;
+                         line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
+                         column =
+                           binding.pvb_pat.ppat_loc.loc_start.pos_cnum
+                           - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
+                       };
+                   };
+                 complexity = complexity_of_expr binding.pvb_expr;
+                 source_file = file;
+               }
+                : Types.complexity_issue))
         bindings
   | _ -> []
 
@@ -172,9 +175,10 @@ let find_complex_functions threshold all_complexities =
   List.filter (fun issue -> issue.complexity > threshold) all_complexities
 
 (* Report complex functions with threshold *)
-let report_complex_with_threshold threshold issues =
+let report_complex_with_threshold threshold
+    (issues : Types.complexity_issue list) =
   List.iter
-    (fun issue ->
+    (fun (issue : Types.complexity_issue) ->
       Printf.printf "Function '%s' has complexity %d (threshold: %d) in %s:%d\n"
         issue.id.name issue.complexity threshold issue.source_file
         issue.id.loc.line)

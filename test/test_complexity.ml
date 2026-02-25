@@ -89,6 +89,8 @@ let test_low_complexity () =
         complexity_enabled = true;
         complexity_threshold = 10;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -116,6 +118,8 @@ let test_high_complexity () =
         complexity_enabled = true;
         complexity_threshold = 5;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -139,6 +143,8 @@ let test_complexity_disabled () =
         complexity_enabled = false;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -164,6 +170,8 @@ let test_both_enabled () =
         complexity_enabled = true;
         complexity_threshold = 3;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -190,6 +198,8 @@ let test_if_and_try_complexity () =
         complexity_enabled = true;
         complexity_threshold = 3;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -222,6 +232,8 @@ let test_match_case_count () =
         complexity_enabled = true;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -249,6 +261,8 @@ let test_try_handler_count () =
         complexity_enabled = true;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -269,6 +283,8 @@ let test_simple_function_complexity () =
         complexity_enabled = true;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -291,6 +307,8 @@ let test_record_complexity () =
         complexity_enabled = true;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -316,6 +334,8 @@ let test_threshold_reported () =
         complexity_enabled = true;
         complexity_threshold = 1;
         naming_enabled = false;
+        length_enabled = false;
+        length_threshold = 50;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in

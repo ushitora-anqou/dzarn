@@ -570,4 +570,23 @@ let run ~fix ~config dir =
       (* If complexity is not enabled, print a message *)
       Printf.printf "Complexity checking disabled.\n";
 
+    (* Run length checker if enabled *)
+    if config.Config.length_enabled then (
+      let lengths =
+        Length.collect_length parse_ml_file module_name_of_file files
+      in
+      let long_funcs =
+        Length.find_long_functions config.Config.length_threshold lengths
+      in
+      if long_funcs = [] then
+        Printf.printf "No functions exceed line count threshold.\n"
+      else (
+        Length.report_length_with_threshold config.Config.length_threshold
+          long_funcs;
+        exit_code := 1);
+      flush stdout)
+    else
+      (* If length is not enabled, print a message *)
+      Printf.printf "Length checking disabled.\n";
+
     !exit_code

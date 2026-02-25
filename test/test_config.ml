@@ -13,14 +13,19 @@ let test_default_config () =
   if default.Config.complexity_threshold = 10 then ()
   else failwith "Default: complexity_threshold should be 10";
   if default.Config.naming_enabled then ()
-  else failwith "Default: naming_enabled should be true"
+  else failwith "Default: naming_enabled should be true";
+  if default.Config.length_enabled then ()
+  else failwith "Default: length_enabled should be true";
+  if default.Config.length_threshold = 50 then ()
+  else failwith "Default: length_threshold should be 50"
 
 (* Test 2: Parse full config *)
 let test_parse_full () =
   let config =
     Config.parse_string
       "((unused_enabled false) (complexity_enabled true) (complexity_threshold \
-       15) (naming_enabled false))"
+       15) (naming_enabled false) (length_enabled true) (length_threshold \
+       100))"
   in
   if config.Config.unused_enabled then
     failwith "Full: unused_enabled should be false"
@@ -30,6 +35,10 @@ let test_parse_full () =
     failwith "Full: complexity_threshold should be 15"
   else if config.Config.naming_enabled then
     failwith "Full: naming_enabled should be false"
+  else if not config.Config.length_enabled then
+    failwith "Full: length_enabled should be true"
+  else if config.Config.length_threshold <> 100 then
+    failwith "Full: length_threshold should be 100"
   else ()
 
 (* Test 3: Parse with comments *)
@@ -38,7 +47,7 @@ let test_parse_with_comments () =
     Config.parse_string
       "; This is a comment\n\
        ((unused_enabled true) (complexity_enabled true) (complexity_threshold \
-       10) (naming_enabled true))"
+       10) (naming_enabled true) (length_enabled true) (length_threshold 50))"
   in
   if config.Config.unused_enabled then ()
   else failwith "Comments: unused_enabled should be true"
