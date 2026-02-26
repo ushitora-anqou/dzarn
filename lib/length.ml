@@ -43,21 +43,13 @@ let collect_binding state mod_name file results binding =
       if not (is_suppressed_and_track state loc) then
         let line_count = line_count_of_expr binding.Ppxlib.Parsetree.pvb_expr in
         results :=
-          {
-            id =
-              {
-                Types.module_name = mod_name;
-                name;
-                loc =
-                  {
-                    Types.file;
-                    line = loc.loc_start.pos_lnum;
-                    column = loc.loc_start.pos_cnum - loc.loc_start.pos_bol;
-                  };
-              };
-            line_count;
-            source_file = file;
-          }
+          make_length_issue
+            ~id:
+              (make_func_id ~module_name:mod_name ~name
+                 ~loc:
+                   (make_loc ~file ~line:loc.loc_start.pos_lnum
+                      ~column:(loc.loc_start.pos_cnum - loc.loc_start.pos_bol)))
+            ~line_count ~source_file:file
           :: !results
   | _ -> ()
 

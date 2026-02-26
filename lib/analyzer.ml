@@ -1,10 +1,8 @@
 module Parse = Ppxlib.Parse
 
-(* String set module - use String directly as key *)
+(* String set module - use derived ord for comparison *)
 module String_set_key = struct
-  type t = string
-
-  let compare = String.compare
+  type t = string [@@deriving ord]
 end
 
 module StringSet = Set.Make (String_set_key)
@@ -12,12 +10,9 @@ module StringSet = Set.Make (String_set_key)
 (* String map module *)
 module StringMap = Map.Make (String_set_key)
 
-(* Module for (module_name, function_name) pairs *)
+(* Module for (module_name, function_name) pairs - use derived ord *)
 module UsagePair = struct
-  type t = string * string
-
-  let compare (m1, f1) (m2, f2) =
-    match String.compare m1 m2 with 0 -> String.compare f1 f2 | c -> c
+  type t = string * string [@@deriving ord]
 end
 
 module UsageSet = Set.Make (UsagePair)
@@ -58,13 +53,11 @@ let find_ocaml_files dir =
 
 (* Location conversion from Location.t to our loc type *)
 let loc_of_location (location : Ppxlib.Location.t) : Types.loc =
-  {
-    Types.file = location.Ppxlib.Location.loc_start.pos_fname;
-    Types.line = location.Ppxlib.Location.loc_start.pos_lnum;
-    Types.column =
-      location.Ppxlib.Location.loc_start.pos_cnum
-      - location.Ppxlib.Location.loc_start.pos_bol;
-  }
+  Types.make_loc ~file:location.Ppxlib.Location.loc_start.pos_fname
+    ~line:location.Ppxlib.Location.loc_start.pos_lnum
+    ~column:
+      (location.Ppxlib.Location.loc_start.pos_cnum
+     - location.Ppxlib.Location.loc_start.pos_bol)
 
 (* AST parsing using ppxlib *)
 let parse_ml_file filename : (Ppxlib.Parsetree.structure, exn) result =
@@ -165,19 +158,14 @@ let collect_function_definitions files =
                         in
                         if is_public then
                           functions :=
-                            {
-                              Types.id =
-                                {
-                                  Types.module_name = mod_name;
-                                  Types.name;
-                                  Types.loc =
-                                    loc_of_location
-                                      binding.Ppxlib.Parsetree.pvb_pat
-                                        .Ppxlib.Parsetree.ppat_loc;
-                                };
-                              Types.is_public = true;
-                              Types.source_file = file;
-                            }
+                            Types.make_func_def
+                              ~id:
+                                (Types.make_func_id ~module_name:mod_name ~name
+                                   ~loc:
+                                     (loc_of_location
+                                        binding.Ppxlib.Parsetree.pvb_pat
+                                          .Ppxlib.Parsetree.ppat_loc))
+                              ~is_public:true ~source_file:file
                             :: !functions
                     | _ -> ())
                   bindings
@@ -202,16 +190,11 @@ let process_ident usages mod_name file longident =
       then ()
       else
         usages :=
-          {
-            Types.id =
-              {
-                Types.module_name = mod_name;
-                Types.name;
-                Types.loc = { Types.file; Types.line = 0; Types.column = 0 };
-              };
-            Types.is_public = true;
-            Types.source_file = file;
-          }
+          Types.make_func_def
+            ~id:
+              (Types.make_func_id ~module_name:mod_name ~name
+                 ~loc:(Types.make_loc ~file ~line:0 ~column:0))
+            ~is_public:true ~source_file:file
           :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot _; _ } ->
       (* Qualified call: Module.func or A.B.func *)
@@ -255,16 +238,11 @@ let process_ident usages mod_name file longident =
         in
         (* Track the usage with the actual module being called *)
         usages :=
-          {
-            Types.id =
-              {
-                Types.module_name = actual_module;
-                Types.name = func_name;
-                Types.loc = { Types.file; Types.line = 0; Types.column = 0 };
-              };
-            Types.is_public = true;
-            Types.source_file = file;
-          }
+          Types.make_func_def
+            ~id:
+              (Types.make_func_id ~module_name:actual_module ~name:func_name
+                 ~loc:(Types.make_loc ~file ~line:0 ~column:0))
+            ~is_public:true ~source_file:file
           :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Lapply _; _ } -> ()
 
@@ -739,16 +717,15 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dir =
        let json_output_data =
          {
            Types.issues = List.rev !all_issues;
-           summary =
-             {
-               Types.total_issues = List.length !all_issues;
-               Types.unused_functions =
-                 Json_reporter.count_by_type "unused_function" !all_issues;
-               Types.complexity =
-                 Json_reporter.count_by_type "complexity" !all_issues;
-               Types.naming = Json_reporter.count_by_type "naming" !all_issues;
-               Types.length = Json_reporter.count_by_type "length" !all_issues;
-             };
+           Types.summary =
+             Types.make_json_output_summary
+               ~total_issues:(List.length !all_issues)
+               ~unused_functions:
+                 (Json_reporter.count_by_type "unused_function" !all_issues)
+               ~complexity:
+                 (Json_reporter.count_by_type "complexity" !all_issues)
+               ~naming:(Json_reporter.count_by_type "naming" !all_issues)
+               ~length:(Json_reporter.count_by_type "length" !all_issues);
          }
        in
        Json_reporter.print_json json_output_data);

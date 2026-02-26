@@ -172,23 +172,15 @@ let complexity_of_structure_item state mod_name file item :
               if is_suppressed_and_track state loc then None
               else
                 Some
-                  ({
-                     id =
-                       {
-                         Types.module_name = mod_name;
-                         name;
-                         loc =
-                           {
-                             Types.file;
-                             line = loc.loc_start.pos_lnum;
-                             column =
-                               loc.loc_start.pos_cnum - loc.loc_start.pos_bol;
-                           };
-                       };
-                     complexity = complexity_of_expr binding.pvb_expr;
-                     source_file = file;
-                   }
-                    : Types.complexity_issue)
+                  (Types.make_complexity_issue
+                     ~id:
+                       (Types.make_func_id ~module_name:mod_name ~name
+                          ~loc:
+                            (Types.make_loc ~file ~line:loc.loc_start.pos_lnum
+                               ~column:
+                                 (loc.loc_start.pos_cnum - loc.loc_start.pos_bol)))
+                     ~complexity:(complexity_of_expr binding.pvb_expr)
+                     ~source_file:file)
           | _ -> None)
         bindings
   | _ -> []

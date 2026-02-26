@@ -17,6 +17,7 @@ depends: [
   "ppxlib" {>= "0.37.0"}
   "odoc" {>= "3.1.0"}
   "ppx_deriving" {>= "6.1.1"}
+  "ppx_deriving_yojson" {>= "3.9.0"}
   "ppx_expect" {>= "v0.17.3"}
   "ppx_inline_test" {>= "v0.17.1"}
   "ppx_sexp_conv" {>= "v0.17.1"}

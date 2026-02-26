@@ -66,9 +66,9 @@ let is_uppercase_snake_case s =
       check 1
 (* Skip first char since we already validated it *)
 
-(* Helper to create a naming violation *)
+(* Helper to create a naming violation using derived make function *)
 let make_violation name loc violation_type file =
-  { name; loc; violation_type; source_file = file }
+  Types.make_naming_violation ~name ~loc ~violation_type ~source_file:file
 
 (* Check if a name is private (starts with underscore) *)
 let is_private_name name = String.length name > 0 && name.[0] = '_'
@@ -79,13 +79,11 @@ let check_poly_variant_name state violations name loc file =
     (* Check if suppressed by nolint attribute *)
     if not (is_suppressed_and_track state loc) then
       let violation_loc =
-        {
-          file = loc.Ppxlib.Location.loc_start.pos_fname;
-          line = loc.Ppxlib.Location.loc_start.pos_lnum;
-          column =
-            loc.Ppxlib.Location.loc_start.pos_cnum
-            - loc.Ppxlib.Location.loc_start.pos_bol;
-        }
+        Types.make_loc ~file:loc.Ppxlib.Location.loc_start.pos_fname
+          ~line:loc.Ppxlib.Location.loc_start.pos_lnum
+          ~column:
+            (loc.Ppxlib.Location.loc_start.pos_cnum
+           - loc.Ppxlib.Location.loc_start.pos_bol)
       in
       violations :=
         make_violation ("`" ^ name) violation_loc
