@@ -4,25 +4,23 @@ module Parse = Ppxlib.Parse
 module String_set_key = struct
   type t = string
 
-  let compare = Stdlib.String.compare
+  let compare = String.compare
 end
 
-module StringSet = Stdlib.Set.Make (String_set_key)
+module StringSet = Set.Make (String_set_key)
 
 (* String map module *)
-module StringMap = Stdlib.Map.Make (String_set_key)
+module StringMap = Map.Make (String_set_key)
 
 (* Module for (module_name, function_name) pairs *)
 module UsagePair = struct
   type t = string * string
 
   let compare (m1, f1) (m2, f2) =
-    match Stdlib.String.compare m1 m2 with
-    | 0 -> Stdlib.String.compare f1 f2
-    | c -> c
+    match String.compare m1 m2 with 0 -> String.compare f1 f2 | c -> c
 end
 
-module UsageSet = Stdlib.Set.Make (UsagePair)
+module UsageSet = Set.Make (UsagePair)
 
 (* Convert Longident.t to string representation *)
 (* Longident.t = Lident of string | Ldot of t * string | Lapply of t * t *)
@@ -36,27 +34,27 @@ let find_ocaml_files dir =
   let files = ref [] in
   let rec traverse dir =
     try
-      let entries = Stdlib.Sys.readdir dir |> Stdlib.Array.to_list in
-      Stdlib.List.iter
+      let entries = Sys.readdir dir |> Array.to_list in
+      List.iter
         (fun entry ->
-          let path = Stdlib.Filename.concat dir entry in
-          if Stdlib.Sys.is_directory path then
+          let path = Filename.concat dir entry in
+          if Sys.is_directory path then
             if
               entry <> "." && entry <> ".." && entry <> "_build"
-              && (not (Stdlib.String.starts_with ~prefix:"." entry))
-              && not (Stdlib.String.starts_with ~prefix:"systemd" entry)
+              && (not (String.starts_with ~prefix:"." entry))
+              && not (String.starts_with ~prefix:"systemd" entry)
             then traverse path
             else ()
           else if
-            Stdlib.Filename.check_suffix entry ".ml"
-            || Stdlib.Filename.check_suffix entry ".mli"
+            Filename.check_suffix entry ".ml"
+            || Filename.check_suffix entry ".mli"
           then files := path :: !files
           else ())
         entries
-    with Stdlib.Sys_error _ -> ()
+    with Sys_error _ -> ()
   in
   traverse dir;
-  Stdlib.List.rev !files
+  List.rev !files
 
 (* Location conversion from Location.t to our loc type *)
 let loc_of_location (location : Ppxlib.Location.t) : Types.loc =
@@ -72,11 +70,11 @@ let loc_of_location (location : Ppxlib.Location.t) : Types.loc =
 let parse_ml_file filename : (Ppxlib.Parsetree.structure, exn) result =
   try
     let code =
-      let ic = Stdlib.open_in_bin filename in
-      let len = Stdlib.in_channel_length ic in
+      let ic = open_in_bin filename in
+      let len = in_channel_length ic in
       let s = Bytes.create len in
-      Stdlib.really_input ic s 0 len;
-      Stdlib.close_in ic;
+      really_input ic s 0 len;
+      close_in ic;
       Bytes.to_string s
     in
     let lexbuf = Lexing.from_string code in
@@ -87,11 +85,11 @@ let parse_ml_file filename : (Ppxlib.Parsetree.structure, exn) result =
 let parse_mli_file filename : (Ppxlib.Parsetree.signature, exn) result =
   try
     let code =
-      let ic = Stdlib.open_in_bin filename in
-      let len = Stdlib.in_channel_length ic in
+      let ic = open_in_bin filename in
+      let len = in_channel_length ic in
       let s = Bytes.create len in
-      Stdlib.really_input ic s 0 len;
-      Stdlib.close_in ic;
+      really_input ic s 0 len;
+      close_in ic;
       Bytes.to_string s
     in
     let lexbuf = Lexing.from_string code in
@@ -100,19 +98,19 @@ let parse_mli_file filename : (Ppxlib.Parsetree.signature, exn) result =
   with e -> Error e
 
 (* Check if a name is private (starts with underscore) *)
-let is_private_name name = Stdlib.String.length name > 0 && name.[0] = '_'
+let is_private_name name = String.length name > 0 && name.[0] = '_'
 
 (* Extract module name from file path *)
 let module_name_of_file file =
-  let base = Stdlib.Filename.basename file in
-  let name = Stdlib.Filename.chop_extension base in
-  Stdlib.String.capitalize_ascii name
+  let base = Filename.basename file in
+  let name = Filename.chop_extension base in
+  String.capitalize_ascii name
 
 (* Collect public function signatures from .mli files *)
 let collect_mli_signatures mli_files =
   (* Returns a map from module name to set of public function names *)
   let sigs = ref StringMap.empty in
-  Stdlib.List.iter
+  List.iter
     (fun file ->
       match parse_mli_file file with
       | Error _ -> ()
@@ -120,7 +118,7 @@ let collect_mli_signatures mli_files =
           let mod_name = module_name_of_file file in
           (* Collect value declarations *)
           let mod_sigs =
-            Stdlib.List.fold_left
+            List.fold_left
               (fun acc item ->
                 match item.Ppxlib.Parsetree.psig_desc with
                 | Ppxlib.Parsetree.Psig_value
@@ -136,12 +134,8 @@ let collect_mli_signatures mli_files =
 (* Function definition collector - simple traversal *)
 let collect_function_definitions files =
   let functions = ref [] in
-  let mli_files =
-    Stdlib.List.filter (fun f -> Stdlib.Filename.check_suffix f ".mli") files
-  in
-  let ml_files =
-    Stdlib.List.filter (fun f -> Stdlib.Filename.check_suffix f ".ml") files
-  in
+  let mli_files = List.filter (fun f -> Filename.check_suffix f ".mli") files in
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let mli_sigs = collect_mli_signatures mli_files in
 
   let process_file file =
@@ -153,11 +147,11 @@ let collect_function_definitions files =
         let mod_sigs =
           if has_mli then Some (StringMap.find mod_name mli_sigs) else None
         in
-        Stdlib.List.iter
+        List.iter
           (fun (item : Ppxlib.Parsetree.structure_item) ->
             match item.Ppxlib.Parsetree.pstr_desc with
             | Ppxlib.Parsetree.Pstr_value (_, bindings) ->
-                Stdlib.List.iter
+                List.iter
                   (fun binding ->
                     match
                       binding.Ppxlib.Parsetree.pvb_pat
@@ -190,8 +184,8 @@ let collect_function_definitions files =
             | _ -> ())
           ast
   in
-  Stdlib.List.iter process_file ml_files;
-  Stdlib.List.rev !functions
+  List.iter process_file ml_files;
+  List.rev !functions
 
 (* Helper to process identifier and record usage *)
 let process_ident usages mod_name file longident =
@@ -226,7 +220,7 @@ let process_ident usages mod_name file longident =
         let start = longident.Ppxlib.Location.loc.Ppxlib.Location.loc_start in
         let end_ = longident.Ppxlib.Location.loc.Ppxlib.Location.loc_end in
         (* Read from file to get the actual text *)
-        let ic = Stdlib.open_in file in
+        let ic = open_in file in
         try
           (* Seek to start position *)
           for _i = 1 to start.pos_lnum - 1 do
@@ -236,11 +230,11 @@ let process_ident usages mod_name file longident =
           let line = input_line ic in
           let start_col = start.pos_cnum - start.pos_bol in
           let end_col = end_.pos_cnum - end_.pos_bol in
-          let text = Stdlib.String.sub line start_col (end_col - start_col) in
-          Stdlib.close_in ic;
+          let text = String.sub line start_col (end_col - start_col) in
+          close_in ic;
           text
         with _ ->
-          Stdlib.close_in ic;
+          close_in ic;
           (* Fallback to empty string if there's an error *)
           ""
       in
@@ -251,13 +245,13 @@ let process_ident usages mod_name file longident =
           else if longident_text.[i] = '.' then i
           else find_from (i - 1)
         in
-        find_from (Stdlib.String.length longident_text - 1)
+        find_from (String.length longident_text - 1)
       in
       if last_dot_index >= 0 then
-        let actual_module = Stdlib.String.sub longident_text 0 last_dot_index in
+        let actual_module = String.sub longident_text 0 last_dot_index in
         let func_name =
-          Stdlib.String.sub longident_text (last_dot_index + 1)
-            (Stdlib.String.length longident_text - last_dot_index - 1)
+          String.sub longident_text (last_dot_index + 1)
+            (String.length longident_text - last_dot_index - 1)
         in
         (* Track the usage with the actual module being called *)
         usages :=
@@ -281,7 +275,7 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
   | Ppxlib.Parsetree.Pexp_ident longident ->
       process_ident usages mod_name file longident
   | Ppxlib.Parsetree.Pexp_tuple el ->
-      Stdlib.List.iter (fun e -> collect_expr usages mod_name file e) el
+      List.iter (fun e -> collect_expr usages mod_name file e) el
   | Ppxlib.Parsetree.Pexp_construct (_, Some e) ->
       collect_expr usages mod_name file e
   | Ppxlib.Parsetree.Pexp_construct (_, None) -> ()
@@ -289,11 +283,9 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
       collect_expr usages mod_name file e
   | Ppxlib.Parsetree.Pexp_record (fields, _) ->
       (* Process record field values *)
-      Stdlib.List.iter
-        (fun (_, expr) -> collect_expr usages mod_name file expr)
-        fields
+      List.iter (fun (_, expr) -> collect_expr usages mod_name file expr) fields
   | Ppxlib.Parsetree.Pexp_array el ->
-      Stdlib.List.iter (collect_expr usages mod_name file) el
+      List.iter (collect_expr usages mod_name file) el
   | Ppxlib.Parsetree.Pexp_sequence (e1, e2) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2
@@ -303,7 +295,7 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
   | Ppxlib.Parsetree.Pexp_for (_, _, _, _, e) ->
       collect_expr usages mod_name file e
   | Ppxlib.Parsetree.Pexp_let (_, ebs, e) ->
-      Stdlib.List.iter
+      List.iter
         (fun eb ->
           collect_expr usages mod_name file eb.Ppxlib.Parsetree.pvb_expr)
         ebs;
@@ -312,7 +304,7 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
       match body with
       | Ppxlib.Parsetree.Pfunction_body e -> collect_expr usages mod_name file e
       | Ppxlib.Parsetree.Pfunction_cases (cases, _, _) ->
-          Stdlib.List.iter
+          List.iter
             (fun c ->
               Option.iter
                 (collect_expr usages mod_name file)
@@ -321,9 +313,7 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
             cases)
   | Ppxlib.Parsetree.Pexp_apply (e, args) ->
       collect_expr usages mod_name file e;
-      Stdlib.List.iter
-        (fun (_, arg) -> collect_expr usages mod_name file arg)
-        args
+      List.iter (fun (_, arg) -> collect_expr usages mod_name file arg) args
   | Ppxlib.Parsetree.Pexp_ifthenelse (e1, e2, e3) ->
       collect_expr usages mod_name file e1;
       collect_expr usages mod_name file e2;
@@ -331,7 +321,7 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
   | Ppxlib.Parsetree.Pexp_try (e, cases) ->
       (* try...with and effect handlers: process the body and all handler cases *)
       collect_expr usages mod_name file e;
-      Stdlib.List.iter
+      List.iter
         (fun c ->
           Option.iter
             (collect_expr usages mod_name file)
@@ -370,7 +360,7 @@ let rec collect_structure usages mod_name file = function
       (match item.Ppxlib.Parsetree.pstr_desc with
       | Ppxlib.Parsetree.Pstr_eval (e, _) -> collect_expr usages mod_name file e
       | Ppxlib.Parsetree.Pstr_value (_, bindings) ->
-          Stdlib.List.iter
+          List.iter
             (fun binding ->
               collect_expr usages mod_name file
                 binding.Ppxlib.Parsetree.pvb_expr)
@@ -392,11 +382,9 @@ let rec collect_structure usages mod_name file = function
 
 let collect_usages files =
   let usages = ref [] in
-  let ml_files =
-    Stdlib.List.filter (fun f -> Stdlib.Filename.check_suffix f ".ml") files
-  in
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
 
-  Stdlib.List.iter
+  List.iter
     (fun file ->
       match parse_ml_file file with
       | Error _ -> ()
@@ -411,7 +399,7 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
     : Types.func_def list =
   (* Collect (module_name, function_name) pairs that are used in expressions *)
   let used_pairs =
-    Stdlib.List.fold_left
+    List.fold_left
       (fun (acc : UsageSet.t) (usage : Types.func_def) ->
         UsageSet.add (usage.Types.id.module_name, usage.Types.id.name) acc)
       UsageSet.empty usages
@@ -426,7 +414,7 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
       (* Fallback: check if name appears elsewhere in the file *)
       (* This catches cases not tracked by AST traversal (e.g., some patterns) *)
       (* We need to exclude qualified calls like Module.func *)
-      let ic = Stdlib.open_in def.source_file in
+      let ic = open_in def.source_file in
       let rec read_lines acc =
         try
           let line = input_line ic in
@@ -436,10 +424,10 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
       let lines =
         try
           let result = read_lines [] in
-          Stdlib.close_in ic;
-          Stdlib.List.rev result
+          close_in ic;
+          List.rev result
         with e ->
-          Stdlib.close_in ic;
+          close_in ic;
           raise e
       in
       (* Check if function name appears unqualified in the file *)
@@ -447,51 +435,51 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
       (* A qualified use like "Module.name" should NOT count *)
       (* Also exclude 'let name = ...' lines which are definitions, not uses *)
       let name = def.id.name in
-      let name_len = Stdlib.String.length name in
+      let name_len = String.length name in
       let is_this_function_definition line =
         (* Check if this line defines 'name' (i.e., "let name = ...") *)
         let rec skip_spaces i =
-          if i >= Stdlib.String.length line then false
+          if i >= String.length line then false
           else
-            match Stdlib.String.get line i with
+            match String.get line i with
             | ' ' | '\t' -> skip_spaces (i + 1)
             | _ -> (
                 (* Check if the line starts with "let " *)
-                let line_len = Stdlib.String.length line in
+                let line_len = String.length line in
                 line_len >= i + 4
-                && Stdlib.String.sub line i 4 = "let "
+                && String.sub line i 4 = "let "
                 &&
                 (* Check if "let " is followed by the function name *)
                 let name_start = i + 4 in
                 line_len >= name_start + name_len
-                && Stdlib.String.sub line name_start name_len = name
+                && String.sub line name_start name_len = name
                 &&
                 (* Check that the name is followed by a space or special char *)
                 let name_end = name_start + name_len in
                 name_end >= line_len
                 ||
-                match Stdlib.String.get line name_end with
+                match String.get line name_end with
                 | ' ' | '\t' | '=' -> true
                 | _ -> false)
         in
         skip_spaces 0
       in
-      Stdlib.List.mapi (fun i line -> (i + 1, line)) lines
-      |> Stdlib.List.exists (fun (line_num, line) ->
+      List.mapi (fun i line -> (i + 1, line)) lines
+      |> List.exists (fun (line_num, line) ->
           if line_num = def.id.loc.line || is_this_function_definition line then
             false
           else
             (* Check each position in the line *)
-            let line_len = Stdlib.String.length line in
+            let line_len = String.length line in
             let rec check_pos pos =
               if pos + name_len > line_len then false
-              else if Stdlib.String.sub line pos name_len = name then
+              else if String.sub line pos name_len = name then
                 (* Check the character before the match *)
                 let is_unqualified =
                   if pos = 0 then true
                     (* At start of line, check that it's not followed by a dot *)
                   else
-                    match Stdlib.String.get line (pos - 1) with
+                    match String.get line (pos - 1) with
                     | ' ' | '(' | ')' | ';' | '=' | ':' | '{' | '}' | '[' | ']'
                     | ',' | '\t' | '\n' ->
                         true
@@ -505,11 +493,11 @@ let find_unused (functions : Types.func_def list) (usages : Types.func_def list)
             check_pos 0)
   in
 
-  Stdlib.List.filter (fun def -> not (is_used_in_file def)) functions
+  List.filter (fun def -> not (is_used_in_file def)) functions
 
 (* Report unused functions *)
 let report_unused (unused : Types.func_def list) : unit =
-  Stdlib.List.iter
+  List.iter
     (fun (def : Types.func_def) ->
       Printf.printf "Unused function '%s' in %s:%d\n" def.Types.id.name
         def.Types.source_file def.Types.id.loc.line)
@@ -525,7 +513,7 @@ let print_structure out_channel ast =
 let remove_unused_functions (unused : Types.func_def list)
     (ast : Ppxlib.Parsetree.structure) : Ppxlib.Parsetree.structure =
   let unused_set =
-    Stdlib.List.fold_left
+    List.fold_left
       (fun acc (def : Types.func_def) -> StringSet.add def.Types.id.name acc)
       StringSet.empty unused
   in
@@ -537,7 +525,7 @@ let remove_unused_functions (unused : Types.func_def list)
           match item.Ppxlib.Parsetree.pstr_desc with
           | Ppxlib.Parsetree.Pstr_value (rf, bindings) ->
               let filtered =
-                Stdlib.List.filter
+                List.filter
                   (fun binding ->
                     match
                       binding.Ppxlib.Parsetree.pvb_pat
@@ -566,11 +554,11 @@ let apply_fix (file : string) (unused : Types.func_def list) : unit =
   | Ok ast ->
       let new_ast = remove_unused_functions unused ast in
       (* Write back to file *)
-      let oc = Stdlib.open_out file in
+      let oc = open_out file in
       let pp = Format.formatter_of_out_channel oc in
       Ppxlib.Pprintast.structure pp new_ast;
       Format.pp_print_flush pp ();
-      Stdlib.close_out oc
+      close_out oc
 
 (* Main run function with config *)
 let run ~fix ~config dir =
@@ -598,18 +586,18 @@ let run ~fix ~config dir =
       if fix then (
         (* Group unused by source file *)
         let by_file =
-          Stdlib.List.fold_left
+          List.fold_left
             (fun (acc : (string * Types.func_def list) list)
                  (def : Types.func_def) ->
               let key = def.Types.source_file in
-              let defs = try Stdlib.List.assoc key acc with Not_found -> [] in
-              (key, def :: defs) :: Stdlib.List.remove_assoc key acc)
+              let defs = try List.assoc key acc with Not_found -> [] in
+              (key, def :: defs) :: List.remove_assoc key acc)
             ([] : (string * Types.func_def list) list)
             unused
         in
 
-        Stdlib.List.iter (fun (file, defs) -> apply_fix file defs) by_file;
-        Printf.printf "Fixed %d file(s).\n" (Stdlib.List.length by_file);
+        List.iter (fun (file, defs) -> apply_fix file defs) by_file;
+        Printf.printf "Fixed %d file(s).\n" (List.length by_file);
         flush stdout));
 
     (* Run naming checker if enabled *)

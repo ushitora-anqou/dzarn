@@ -11,7 +11,7 @@ let is_snake_char c = is_lowercase c || ('0' <= c && c <= '9') || c = '_'
 
 (* Check if a string is lowercase snake_case *)
 let is_lowercase_snake_case s =
-  if Stdlib.String.length s = 0 then false
+  if String.length s = 0 then false
   else
     let first = s.[0] in
     (* First char must be lowercase letter *)
@@ -19,7 +19,7 @@ let is_lowercase_snake_case s =
     else
       (* All chars must be snake_case chars *)
       let rec check i =
-        if i >= Stdlib.String.length s then true
+        if i >= String.length s then true
         else if is_snake_char s.[i] then check (i + 1)
         else false
       in
@@ -27,7 +27,7 @@ let is_lowercase_snake_case s =
 
 (* Check if a string is uppercase snake_case (first char uppercase, rest snake_case) *)
 let is_uppercase_snake_case s =
-  if Stdlib.String.length s = 0 then false
+  if String.length s = 0 then false
   else
     let first = s.[0] in
     (* First char must be uppercase letter *)
@@ -35,7 +35,7 @@ let is_uppercase_snake_case s =
     else
       (* All chars must be snake_case chars (lowercase, digit, underscore) *)
       let rec check i =
-        if i >= Stdlib.String.length s then true
+        if i >= String.length s then true
         else if is_snake_char s.[i] then check (i + 1)
         else false
       in
@@ -47,7 +47,7 @@ let make_violation name loc violation_type file =
   { Types.name; Types.loc; Types.violation_type; Types.source_file = file }
 
 (* Check if a name is private (starts with underscore) *)
-let is_private_name name = Stdlib.String.length name > 0 && name.[0] = '_'
+let is_private_name name = String.length name > 0 && name.[0] = '_'
 
 (* Check polymorphic variant name - should be uppercase snake_case *)
 let check_poly_variant_name violations name loc file =
@@ -132,7 +132,7 @@ let rec check_expression violations file = function
       match body with
       | Pfunction_body e -> check_expression violations file e
       | Pfunction_cases (cases, _, _) ->
-          Stdlib.List.iter
+          List.iter
             (fun c ->
               check_pattern violations file c.Ppxlib.Parsetree.pc_lhs;
               Option.iter
@@ -142,7 +142,7 @@ let rec check_expression violations file = function
             cases)
   | { pexp_desc = Ppxlib.Parsetree.Pexp_match (e, cases); _ } ->
       check_expression violations file e;
-      Stdlib.List.iter
+      List.iter
         (fun c ->
           check_pattern violations file c.Ppxlib.Parsetree.pc_lhs;
           Option.iter
@@ -152,7 +152,7 @@ let rec check_expression violations file = function
         cases
   | { pexp_desc = Ppxlib.Parsetree.Pexp_try (e, cases); _ } ->
       check_expression violations file e;
-      Stdlib.List.iter
+      List.iter
         (fun c ->
           check_pattern violations file c.Ppxlib.Parsetree.pc_lhs;
           Option.iter
@@ -161,7 +161,7 @@ let rec check_expression violations file = function
           check_expression violations file c.Ppxlib.Parsetree.pc_rhs)
         cases
   | { pexp_desc = Ppxlib.Parsetree.Pexp_let (_, bindings, e); _ } ->
-      Stdlib.List.iter
+      List.iter
         (fun binding ->
           check_pattern violations file binding.Ppxlib.Parsetree.pvb_pat;
           check_expression violations file binding.Ppxlib.Parsetree.pvb_expr)
@@ -185,17 +185,13 @@ let rec check_expression violations file = function
       check_expression violations file e
   | { pexp_desc = Ppxlib.Parsetree.Pexp_apply (e, args); _ } ->
       check_expression violations file e;
-      Stdlib.List.iter
-        (fun (_, arg) -> check_expression violations file arg)
-        args
+      List.iter (fun (_, arg) -> check_expression violations file arg) args
   | { pexp_desc = Ppxlib.Parsetree.Pexp_tuple el; _ } ->
-      Stdlib.List.iter (fun e -> check_expression violations file e) el
+      List.iter (fun e -> check_expression violations file e) el
   | { pexp_desc = Ppxlib.Parsetree.Pexp_array el; _ } ->
-      Stdlib.List.iter (check_expression violations file) el
+      List.iter (check_expression violations file) el
   | { pexp_desc = Ppxlib.Parsetree.Pexp_record (fields, _); _ } ->
-      Stdlib.List.iter
-        (fun (_, expr) -> check_expression violations file expr)
-        fields
+      List.iter (fun (_, expr) -> check_expression violations file expr) fields
   | { pexp_desc = Ppxlib.Parsetree.Pexp_field (e, _); _ } ->
       check_expression violations file e
   | { pexp_desc = Ppxlib.Parsetree.Pexp_setfield (e1, _, e2); _ } ->
@@ -226,7 +222,7 @@ let check_type_decl violations file
     ({ ptype_kind; _ } : Ppxlib.Parsetree.type_declaration) =
   match ptype_kind with
   | Ppxlib.Parsetree.Ptype_variant constructors ->
-      Stdlib.List.iter
+      List.iter
         (fun ({ pcd_name = { txt = ctor_name; _ }; pcd_loc; _ } :
                Ppxlib.Parsetree.constructor_declaration) ->
           (* Check if variant constructor name is uppercase snake_case *)
@@ -258,7 +254,7 @@ let check_structure_item violations file = function
       Ppxlib.Parsetree.pstr_desc = Ppxlib.Parsetree.Pstr_value (_, bindings);
       _;
     } ->
-      Stdlib.List.iter
+      List.iter
         (fun binding ->
           check_pattern violations file binding.Ppxlib.Parsetree.pvb_pat;
           check_expression violations file binding.Ppxlib.Parsetree.pvb_expr)
@@ -267,30 +263,28 @@ let check_structure_item violations file = function
       Ppxlib.Parsetree.pstr_desc = Ppxlib.Parsetree.Pstr_type (_, type_decls);
       _;
     } ->
-      Stdlib.List.iter (check_type_decl violations file) type_decls
+      List.iter (check_type_decl violations file) type_decls
   | _ -> ()
 
 (* Collect all naming violations from files *)
 let collect_naming_violations parse_ml files =
-  let ml_files =
-    Stdlib.List.filter (fun f -> Filename.check_suffix f ".ml") files
-  in
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let violations = ref [] in
-  Stdlib.List.iter
+  List.iter
     (fun file ->
       match parse_ml file with
       | Error _ -> ()
-      | Ok ast -> Stdlib.List.iter (check_structure_item violations file) ast)
+      | Ok ast -> List.iter (check_structure_item violations file) ast)
     ml_files;
-  Stdlib.List.rev !violations
+  List.rev !violations
 
 (* Report naming violations *)
 let report_naming_violations violations =
-  Stdlib.List.iter
+  List.iter
     (fun violation ->
-      Stdlib.Printf.printf "Naming violation: %s at %s:%d:%d\n%s\n"
+      Printf.printf "Naming violation: %s at %s:%d:%d\n%s\n"
         violation.Types.name violation.Types.source_file
         violation.Types.loc.line violation.Types.loc.column
         violation.Types.violation_type)
     violations;
-  Stdlib.flush stdout
+  flush stdout

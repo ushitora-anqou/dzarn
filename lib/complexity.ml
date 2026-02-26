@@ -10,19 +10,15 @@ let rec complexity_of_expr = function
       match payload with Some e -> complexity_of_expr e | None -> 1)
   | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_tuple items; _ } ->
       (* Tuple doesn't add complexity *)
-      Stdlib.List.fold_left
-        (fun acc e -> max acc (complexity_of_expr e))
-        1 items
+      List.fold_left (fun acc e -> max acc (complexity_of_expr e)) 1 items
   | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_record (fields, _); _ }
     ->
       (* Record doesn't add complexity *)
-      Stdlib.List.fold_left
+      List.fold_left
         (fun acc (_label, expr) -> max acc (complexity_of_expr expr))
         1 fields
   | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_array items; _ } ->
-      Stdlib.List.fold_left
-        (fun acc e -> max acc (complexity_of_expr e))
-        1 items
+      List.fold_left (fun acc e -> max acc (complexity_of_expr e)) 1 items
   | {
       Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_ifthenelse (e1, e2, e3);
       _;
@@ -49,7 +45,7 @@ let rec complexity_of_expr = function
     ->
       (* Match adds 1 for the decision point *)
       let case_complexity =
-        Stdlib.List.fold_left
+        List.fold_left
           (fun acc c ->
             max acc
               (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
@@ -60,7 +56,7 @@ let rec complexity_of_expr = function
   | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_try (e, cases); _ } ->
       (* Try-with adds 1 for the decision point *)
       let handler_complexity =
-        Stdlib.List.fold_left
+        List.fold_left
           (fun acc c ->
             max acc
               (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
@@ -77,7 +73,7 @@ let rec complexity_of_expr = function
       | Ppxlib.Parsetree.Pfunction_cases (cases, _, _) ->
           (* Function match adds 1 for the decision point *)
           let case_complexity =
-            Stdlib.List.fold_left
+            List.fold_left
               (fun acc c ->
                 max acc
                   (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
@@ -87,7 +83,7 @@ let rec complexity_of_expr = function
           in
           1 + case_complexity)
   | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_apply (e, args); _ } ->
-      Stdlib.List.fold_left
+      List.fold_left
         (fun acc (_, arg) -> max acc (complexity_of_expr arg))
         (complexity_of_expr e) args
   | {
@@ -95,7 +91,7 @@ let rec complexity_of_expr = function
       _;
     } ->
       let bindings_complexity =
-        Stdlib.List.fold_left
+        List.fold_left
           (fun acc binding ->
             max acc (complexity_of_expr binding.Ppxlib.Parsetree.pvb_expr))
           1 bindings
@@ -145,7 +141,7 @@ let complexity_of_structure_item mod_name file item :
     Types.complexity_issue list =
   match item.Ppxlib.Parsetree.pstr_desc with
   | Pstr_value (_, bindings) ->
-      Stdlib.List.map
+      List.map
         (fun binding ->
           match binding.Ppxlib.Parsetree.pvb_pat.Ppxlib.Parsetree.ppat_desc with
           | Ppat_var { txt = name; _ } ->
@@ -191,17 +187,15 @@ let complexity_of_structure_item mod_name file item :
 
 (* Collect complexity for all functions in files *)
 let collect_complexity parse_ml module_name files =
-  let ml_files =
-    Stdlib.List.filter (fun f -> Filename.check_suffix f ".ml") files
-  in
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let results = ref [] in
-  Stdlib.List.iter
+  List.iter
     (fun file ->
       match parse_ml file with
       | Result.Error _ -> ()
       | Result.Ok ast ->
           let mod_name = module_name file in
-          Stdlib.List.iter
+          List.iter
             (fun item ->
               let complexities =
                 complexity_of_structure_item mod_name file item
@@ -213,14 +207,12 @@ let collect_complexity parse_ml module_name files =
 
 (* Find functions exceeding threshold *)
 let find_complex_functions threshold all_complexities =
-  Stdlib.List.filter
-    (fun issue -> issue.Types.complexity > threshold)
-    all_complexities
+  List.filter (fun issue -> issue.Types.complexity > threshold) all_complexities
 
 (* Report complex functions with threshold *)
 let report_complex_with_threshold threshold
     (issues : Types.complexity_issue list) =
-  Stdlib.List.iter
+  List.iter
     (fun (issue : Types.complexity_issue) ->
       Printf.printf "Function '%s' has complexity %d (threshold: %d) in %s:%d\n"
         issue.id.name issue.Types.complexity threshold issue.source_file

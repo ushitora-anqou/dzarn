@@ -51,9 +51,9 @@ let rec find_nested_bindings mod_name file results expr =
   match expr.Ppxlib.Parsetree.pexp_desc with
   | Ppxlib.Parsetree.Pexp_let (_, bindings, body) ->
       (* Collect the nested bindings *)
-      Stdlib.List.iter (collect_binding mod_name file results) bindings;
+      List.iter (collect_binding mod_name file results) bindings;
       (* Also check the body for more nested bindings *)
-      Stdlib.List.iter
+      List.iter
         (fun binding ->
           find_nested_bindings mod_name file results
             binding.Ppxlib.Parsetree.pvb_expr)
@@ -65,7 +65,7 @@ let rec find_nested_bindings mod_name file results expr =
       | Ppxlib.Parsetree.Pfunction_body e ->
           find_nested_bindings mod_name file results e
       | Ppxlib.Parsetree.Pfunction_cases (cases, _, _) ->
-          Stdlib.List.iter
+          List.iter
             (fun c ->
               Option.iter
                 (fun e -> find_nested_bindings mod_name file results e)
@@ -75,7 +75,7 @@ let rec find_nested_bindings mod_name file results expr =
             cases)
   | Ppxlib.Parsetree.Pexp_match (e, cases) ->
       find_nested_bindings mod_name file results e;
-      Stdlib.List.iter
+      List.iter
         (fun c ->
           Option.iter
             (fun e -> find_nested_bindings mod_name file results e)
@@ -84,7 +84,7 @@ let rec find_nested_bindings mod_name file results expr =
         cases
   | Ppxlib.Parsetree.Pexp_try (e, cases) ->
       find_nested_bindings mod_name file results e;
-      Stdlib.List.iter
+      List.iter
         (fun c ->
           Option.iter
             (fun e -> find_nested_bindings mod_name file results e)
@@ -105,15 +105,15 @@ let rec find_nested_bindings mod_name file results expr =
       find_nested_bindings mod_name file results e
   | Ppxlib.Parsetree.Pexp_apply (e, args) ->
       find_nested_bindings mod_name file results e;
-      Stdlib.List.iter
+      List.iter
         (fun (_, arg) -> find_nested_bindings mod_name file results arg)
         args
   | Ppxlib.Parsetree.Pexp_tuple items ->
-      Stdlib.List.iter (find_nested_bindings mod_name file results) items
+      List.iter (find_nested_bindings mod_name file results) items
   | Ppxlib.Parsetree.Pexp_array items ->
-      Stdlib.List.iter (find_nested_bindings mod_name file results) items
+      List.iter (find_nested_bindings mod_name file results) items
   | Ppxlib.Parsetree.Pexp_record (fields, _) ->
-      Stdlib.List.iter
+      List.iter
         (fun (_, expr) -> find_nested_bindings mod_name file results expr)
         fields
   | Ppxlib.Parsetree.Pexp_field (e, _) ->
@@ -143,26 +143,22 @@ let rec find_nested_bindings mod_name file results expr =
 
 (* Collect length for all functions in files *)
 let collect_length parse_ml module_name files =
-  let ml_files =
-    Stdlib.List.filter (fun f -> Stdlib.Filename.check_suffix f ".ml") files
-  in
+  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let results = ref [] in
-  Stdlib.List.iter
+  List.iter
     (fun file ->
       match parse_ml file with
       | Error _ -> ()
       | Ok ast ->
           let mod_name = module_name file in
-          Stdlib.List.iter
+          List.iter
             (fun item ->
               match item.Ppxlib.Parsetree.pstr_desc with
               | Ppxlib.Parsetree.Pstr_value (_, bindings) ->
                   (* Process top-level bindings *)
-                  Stdlib.List.iter
-                    (collect_binding mod_name file results)
-                    bindings;
+                  List.iter (collect_binding mod_name file results) bindings;
                   (* Also find nested bindings inside function bodies *)
-                  Stdlib.List.iter
+                  List.iter
                     (fun binding ->
                       find_nested_bindings mod_name file results
                         binding.Ppxlib.Parsetree.pvb_expr)
@@ -170,18 +166,18 @@ let collect_length parse_ml module_name files =
               | _ -> ())
             ast)
     ml_files;
-  Stdlib.List.rev !results
+  List.rev !results
 
 (* Find functions exceeding line count threshold *)
 let find_long_functions threshold all_lengths =
-  Stdlib.List.filter (fun issue -> issue.line_count > threshold) all_lengths
+  List.filter (fun issue -> issue.line_count > threshold) all_lengths
 
 (* Report functions that exceed the line count threshold *)
 let report_length_with_threshold threshold issues =
-  Stdlib.List.iter
+  List.iter
     (fun issue ->
-      Stdlib.Printf.printf
-        "Function '%s' has %d lines (threshold: %d) in %s:%d\n" issue.id.name
-        issue.line_count threshold issue.source_file issue.id.loc.line)
+      Printf.printf "Function '%s' has %d lines (threshold: %d) in %s:%d\n"
+        issue.id.name issue.line_count threshold issue.source_file
+        issue.id.loc.line)
     issues;
-  Stdlib.flush stdout
+  flush stdout
