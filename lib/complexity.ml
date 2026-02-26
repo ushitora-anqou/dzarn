@@ -3,12 +3,24 @@
 (* Nolint suppression support *)
 type suppression_state = {
   suppressed_linters_by_line : (int * Nolint.linter list) list;
+  usage_tracker : Nolint.usage_tracker option;
 }
 
 (* Check if a location is suppressed for the complexity linter *)
 let is_suppressed state loc =
   Nolint.is_location_suppressed state.suppressed_linters_by_line loc
     Nolint.Complexity
+
+(* Check if suppressed and mark as used *)
+let is_suppressed_and_track state loc =
+  let suppressed = is_suppressed state loc in
+  (if suppressed then
+     match state.usage_tracker with
+     | None -> ()
+     | Some tracker ->
+         let line = Nolint.line_of_loc loc in
+         Nolint.mark_nolint_used tracker line "complexity");
+  suppressed
 
 (* Calculate cyclomatic complexity of an expression *)
 (* Base complexity is 1, additional complexity for decision points *)
@@ -157,7 +169,7 @@ let complexity_of_structure_item state mod_name file item :
           | Ppat_var { txt = name; _ } ->
               let loc = binding.pvb_pat.ppat_loc in
               (* Check if suppressed by nolint attribute *)
-              if is_suppressed state loc then None
+              if is_suppressed_and_track state loc then None
               else
                 Some
                   ({
@@ -182,7 +194,7 @@ let complexity_of_structure_item state mod_name file item :
   | _ -> []
 
 (* Collect complexity for all functions in files *)
-let collect_complexity parse_ml module_name files =
+let collect_complexity parse_ml module_name ?(usage_tracker = None) files =
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let results = ref [] in
   List.iter
@@ -193,7 +205,7 @@ let collect_complexity parse_ml module_name files =
           let mod_name = module_name file in
           (* Collect nolint suppressions for this file *)
           let suppressed_linters_by_line = Nolint.collect_suppressions ast in
-          let state = { suppressed_linters_by_line } in
+          let state = { suppressed_linters_by_line; usage_tracker } in
           List.iter
             (fun item ->
               let complexities =

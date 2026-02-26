@@ -87,6 +87,7 @@ Configure dzarn using a sexp-format configuration file (default: `dzarn.sexp`):
 | `naming_enabled` | bool | `true` | Enable/disable naming convention checking |
 | `length_enabled` | bool | `true` | Enable/disable function length checking |
 | `length_threshold` | int | `50` | Maximum number of lines before reporting |
+| `unused_nolint_enabled` | bool | `true` | Enable/disable unused nolint directive detection |
 
 ### Output Examples
 
@@ -100,6 +101,9 @@ Naming violation: camelCase at src/utils.ml:5:4
 variable/function name should be lowercase snake_case
 Naming violation: `bad_variant at src/types.ml:12:20
 polymorphic variant should be uppercase snake_case
+Unused nolint directive at src/file.ml:10:1
+  The [@@@nolint] attribute does not suppress any violations for linters: naming
+No unused nolint directives found.
 ```
 
 **Exit codes:**
@@ -306,6 +310,48 @@ let complexFunction x [@@nolint "naming" "complexity"] =
 ```ocaml
 [@@@nolint "all"]  (* Disables all linters for the rest of the file *)
 ```
+
+## Detecting Unused `[@nolint]` Directives
+
+dzarn can detect `[@nolint]` attributes that don't actually suppress any violations. This helps keep your codebase clean by identifying obsolete suppression directives that are no longer needed.
+
+### How It Works
+
+The unused nolint detector tracks which nolint attributes were **actually used** to suppress a violation, then reports any nolints that were never marked as "used".
+
+### Configuration
+
+Enable or disable unused nolint detection via the configuration file:
+
+```sexp
+((unused_nolint_enabled true))
+```
+
+### Example
+
+```ocaml
+(* This nolint is unused - there's no naming violation *)
+let good_name x = x + 1 [@@nolint "naming"]
+
+(* This nolint IS used - suppresses naming violation *)
+let camelCase x = x + 2 [@@nolint "naming"]
+```
+
+When running dzarn on this file with `unused_nolint_enabled` set to `true`:
+
+```bash
+$ dzarn src/
+Unused nolint directive at src/file.ml:2:1
+  The [@@@nolint] attribute does not suppress any violations for linters: naming
+Naming violation: camelCase at src/file.ml:5:1
+variable/function name should be lowercase snake_case
+```
+
+### Notes
+
+- A nolint attribute with multiple linters (e.g., `[@nolint "naming" "complexity"]`) is only reported as unused if **none** of the specified linters would report a violation
+- The `"all"` linter name is considered used if **any** linter would report a violation at that location
+- If a linter is disabled in the configuration, its nolints may be reported as unused since that linter won't report any violations
 
 ## Limitations
 

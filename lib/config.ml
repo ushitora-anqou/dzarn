@@ -11,6 +11,7 @@ type t = {
   naming_enabled : bool;
   length_enabled : bool;
   length_threshold : int;
+  unused_nolint_enabled : bool;
 }
 [@@deriving sexp]
 
@@ -22,6 +23,7 @@ let default =
     naming_enabled = true;
     length_enabled = true;
     length_threshold = 50;
+    unused_nolint_enabled = true;
   }
 
 let parse_file filename =

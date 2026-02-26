@@ -5,12 +5,24 @@ open Types
 (* Nolint suppression support *)
 type suppression_state = {
   suppressed_linters_by_line : (int * Nolint.linter list) list;
+  usage_tracker : Nolint.usage_tracker option;
 }
 
 (* Check if a location is suppressed for the length linter *)
 let is_suppressed state loc =
   Nolint.is_location_suppressed state.suppressed_linters_by_line loc
     Nolint.Length
+
+(* Check if suppressed and mark as used *)
+let is_suppressed_and_track state loc =
+  let suppressed = is_suppressed state loc in
+  (if suppressed then
+     match state.usage_tracker with
+     | None -> ()
+     | Some tracker ->
+         let line = Nolint.line_of_loc loc in
+         Nolint.mark_nolint_used tracker line "length");
+  suppressed
 
 (* Calculate line count of an expression from its location *)
 let line_count_of_expr expr =
@@ -28,7 +40,7 @@ let collect_binding state mod_name file results binding =
   | Ppxlib.Parsetree.Ppat_var { txt = name; _ } ->
       let loc = binding.Ppxlib.Parsetree.pvb_pat.Ppxlib.Parsetree.ppat_loc in
       (* Check if suppressed by nolint attribute *)
-      if not (is_suppressed state loc) then
+      if not (is_suppressed_and_track state loc) then
         let line_count = line_count_of_expr binding.Ppxlib.Parsetree.pvb_expr in
         results :=
           {
@@ -149,7 +161,7 @@ let rec find_nested_bindings state mod_name file results expr =
   | _ -> ()
 
 (* Collect length for all functions in files *)
-let collect_length parse_ml module_name files =
+let collect_length parse_ml module_name ?(usage_tracker = None) files =
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let results = ref [] in
   List.iter
@@ -160,7 +172,7 @@ let collect_length parse_ml module_name files =
           let mod_name = module_name file in
           (* Collect nolint suppressions for this file *)
           let suppressed_linters_by_line = Nolint.collect_suppressions ast in
-          let state = { suppressed_linters_by_line } in
+          let state = { suppressed_linters_by_line; usage_tracker } in
           List.iter
             (fun item ->
               match item.Ppxlib.Parsetree.pstr_desc with

@@ -3,12 +3,24 @@
 (* Nolint suppression support *)
 type suppression_state = {
   suppressed_linters_by_line : (int * Nolint.linter list) list;
+  usage_tracker : Nolint.usage_tracker option;
 }
 
 (* Check if a location is suppressed for the naming linter *)
 let is_suppressed state loc =
   Nolint.is_location_suppressed state.suppressed_linters_by_line loc
     Nolint.Naming
+
+(* Check if suppressed and mark as used *)
+let is_suppressed_and_track state loc =
+  let suppressed = is_suppressed state loc in
+  (if suppressed then
+     match state.usage_tracker with
+     | None -> ()
+     | Some tracker ->
+         let line = Nolint.line_of_loc loc in
+         Nolint.mark_nolint_used tracker line "naming");
+  suppressed
 
 (* Check if a character is uppercase *)
 let is_uppercase c = 'A' <= c && c <= 'Z'
@@ -63,7 +75,7 @@ let is_private_name name = String.length name > 0 && name.[0] = '_'
 let check_poly_variant_name state violations name loc file =
   if not (is_uppercase_snake_case name) then
     (* Check if suppressed by nolint attribute *)
-    if not (is_suppressed state loc) then
+    if not (is_suppressed_and_track state loc) then
       let violation_loc =
         {
           Types.file = loc.Ppxlib.Location.loc_start.pos_fname;
@@ -289,7 +301,7 @@ let check_type_decl state violations file
           (* Check if variant constructor name is uppercase snake_case *)
           if not (is_uppercase_snake_case ctor_name) then
             (* Check if suppressed by nolint attribute *)
-            if not (is_suppressed state pcd_loc) then
+            if not (is_suppressed_and_track state pcd_loc) then
               let loc =
                 {
                   Types.file = pcd_loc.loc_start.pos_fname;
@@ -330,8 +342,7 @@ let check_structure_item state violations file = function
           in
           (* Also check line-based suppressions for [@@nolint "..."] attributes *)
           let line_suppressed =
-            Nolint.is_location_suppressed state.suppressed_linters_by_line
-              pat.Ppxlib.Parsetree.ppat_loc Nolint.Naming
+            is_suppressed_and_track state pat.Ppxlib.Parsetree.ppat_loc
           in
           if (not has_nolint_attr) && not line_suppressed then
             check_pattern state violations file pat;
@@ -346,7 +357,7 @@ let check_structure_item state violations file = function
   | _ -> ()
 
 (* Collect all naming violations from files *)
-let collect_naming_violations parse_ml files =
+let collect_naming_violations parse_ml ?(usage_tracker = None) files =
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let violations = ref [] in
   List.iter
@@ -356,7 +367,7 @@ let collect_naming_violations parse_ml files =
       | Ok ast ->
           (* Collect nolint suppressions for this file *)
           let suppressed_linters_by_line = Nolint.collect_suppressions ast in
-          let state = { suppressed_linters_by_line } in
+          let state = { suppressed_linters_by_line; usage_tracker } in
           List.iter (check_structure_item state violations file) ast)
     ml_files;
   List.rev !violations

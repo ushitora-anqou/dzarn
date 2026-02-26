@@ -91,6 +91,7 @@ let test_low_complexity () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -120,6 +121,7 @@ let test_high_complexity () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -145,6 +147,7 @@ let test_complexity_disabled () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -172,6 +175,7 @@ let test_both_enabled () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -200,6 +204,7 @@ let test_if_and_try_complexity () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -234,6 +239,7 @@ let test_match_case_count () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -263,6 +269,7 @@ let test_try_handler_count () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -285,6 +292,7 @@ let test_simple_function_complexity () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -309,6 +317,7 @@ let test_record_complexity () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -336,6 +345,7 @@ let test_threshold_reported () =
         naming_enabled = false;
         length_enabled = false;
         length_threshold = 50;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in

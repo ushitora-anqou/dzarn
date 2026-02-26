@@ -91,6 +91,7 @@ let test_short_function () =
         length_enabled = true;
         length_threshold = 50;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -116,6 +117,7 @@ let test_long_function () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -141,6 +143,7 @@ let test_length_disabled () =
         length_enabled = false;
         length_threshold = 1;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -167,6 +170,7 @@ let test_mixed_functions () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -194,6 +198,7 @@ let test_threshold_reported () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -220,6 +225,7 @@ let test_line_count_reported () =
         length_enabled = true;
         length_threshold = 3;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -249,6 +255,7 @@ let test_nested_long_function () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -283,6 +290,7 @@ let test_nested_both_long () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -310,6 +318,7 @@ let test_nested_outer_short_inner_long () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -343,6 +352,7 @@ let test_deeply_nested_functions () =
         length_enabled = true;
         length_threshold = 5;
         complexity_threshold = 10;
+        unused_nolint_enabled = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in

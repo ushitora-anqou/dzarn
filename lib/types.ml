@@ -27,3 +27,12 @@ type naming_result = { violations : naming_violation list }
 (* Function length result *)
 type length_issue = { id : func_id; line_count : int; source_file : string }
 type length_result = { long_functions : length_issue list }
+
+(* Unused nolint directive *)
+type unused_nolint = {
+  loc : loc;
+  linter_name : string; (* "naming", "complexity", "length", etc. *)
+  source_file : string;
+}
+
+type unused_nolint_result = { unused_suppressions : unused_nolint list }

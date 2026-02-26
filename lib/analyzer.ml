@@ -570,6 +570,25 @@ let run ~fix ~config dir =
   else
     let exit_code = ref 0 in
 
+    (* Create usage tracker if unused_nolint checking is enabled *)
+    let usage_tracker =
+      if config.Config.unused_nolint_enabled then
+        Some (Nolint.create_usage_tracker ())
+      else None
+    in
+
+    (* Collect nolints and populate tracker *)
+    (match usage_tracker with
+    | None -> ()
+    | Some tracker ->
+        List.iter
+          (fun file ->
+            match parse_ml_file file with
+            | Ok ast ->
+                ignore (Nolint.collect_suppressions_with_tracker ast tracker)
+            | _ -> ())
+          files);
+
     (* Run unused function checker if enabled *)
     if config.Config.unused_enabled then (
       let functions = collect_function_definitions files in
@@ -602,7 +621,9 @@ let run ~fix ~config dir =
 
     (* Run naming checker if enabled *)
     if config.Config.naming_enabled then (
-      let violations = Naming.collect_naming_violations parse_ml_file files in
+      let violations =
+        Naming.collect_naming_violations parse_ml_file ~usage_tracker files
+      in
       if violations = [] then
         Printf.printf "No naming convention violations found.\n"
       else (
@@ -616,7 +637,8 @@ let run ~fix ~config dir =
     (* Run complexity checker if enabled *)
     if config.Config.complexity_enabled then (
       let complexities =
-        Complexity.collect_complexity parse_ml_file module_name_of_file files
+        Complexity.collect_complexity parse_ml_file module_name_of_file
+          ~usage_tracker files
       in
       let complex_funcs =
         Complexity.find_complex_functions config.Config.complexity_threshold
@@ -636,7 +658,8 @@ let run ~fix ~config dir =
     (* Run length checker if enabled *)
     if config.Config.length_enabled then (
       let lengths =
-        Length.collect_length parse_ml_file module_name_of_file files
+        Length.collect_length parse_ml_file module_name_of_file ~usage_tracker
+          files
       in
       let long_funcs =
         Length.find_long_functions config.Config.length_threshold lengths
@@ -651,5 +674,28 @@ let run ~fix ~config dir =
     else
       (* If length is not enabled, print a message *)
       Printf.printf "Length checking disabled.\n";
+
+    (* Check for unused nolints *)
+    (if config.Config.unused_nolint_enabled then
+       match usage_tracker with
+       | None -> ()
+       | Some tracker ->
+           let unused = Nolint.find_unused_nolints tracker in
+           if unused <> [] then (
+             (* Report unused nolints *)
+             List.iter
+               (fun (line, column, linter_names, _attr_type) ->
+                 (* We need to figure out which file this nolint is in *)
+                 (* For now, we'll report a generic message *)
+                 Printf.printf
+                   "Unused nolint directive at line %d:%d\n\
+                   \  The [@@@nolint] attribute does not suppress any \
+                    violations for linters: %s\n"
+                   line column
+                   (String.concat ", " linter_names))
+               unused;
+             exit_code := 1)
+           else Printf.printf "No unused nolint directives found.\n");
+    flush stdout;
 
     !exit_code

@@ -457,6 +457,24 @@ let test_nolint_atatat_attributes () =
     failwith "alsoSuppressed should be suppressed by [@@@nolint \"naming\"]"
   else ()
 
+(* Test 22: Unused nolint detection *)
+let test_unused_nolint () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "unused_nolint.ml" (Filename.concat tmp_dir "unused_nolint.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Should report unused nolint *)
+  if string_contains output "Unused nolint directive" then ()
+  else failwith "Expected unused nolint to be reported"
+
+(* Test 23: Used nolints should not be reported *)
+let test_used_nolint () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "used_nolint.ml" (Filename.concat tmp_dir "used_nolint.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Should NOT report unused nolint *)
+  if not (string_contains output "Unused nolint directive") then ()
+  else failwith "Used nolint should not be reported as unused"
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -511,4 +529,8 @@ let () =
           test_case "suppress all subsequent items" `Quick
             test_nolint_atatat_attributes;
         ] );
+      ( "Unused nolint detection",
+        [ test_case "detects unused nolint" `Quick test_unused_nolint ] );
+      ( "Used nolint validation",
+        [ test_case "used nolint not reported" `Quick test_used_nolint ] );
     ]
