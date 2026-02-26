@@ -100,7 +100,7 @@ let string_contains s sub =
   check 0
 
 (* Helper to capture output from Analyzer.run *)
-let run_analyzer ~fix dir =
+let run_analyzer ~fix ?(json_output = false) dir =
   let output_file = Filename.concat dir "analyzer_output.txt" in
   (* Remove any existing output file *)
   (try Sys.remove output_file with _ -> ());
@@ -111,7 +111,7 @@ let run_analyzer ~fix dir =
     Unix.dup2 (Unix.descr_of_out_channel oc) Unix.stdout;
     let config = Dzarn.Config.default in
     let code =
-      try Dzarn.Analyzer.run ~fix ~config dir
+      try Dzarn.Analyzer.run ~fix ~config ~json_output dir
       with e ->
         flush stdout;
         Unix.dup2 old_stdout Unix.stdout;
@@ -475,6 +475,39 @@ let test_used_nolint () =
   if not (string_contains output "Unused nolint directive") then ()
   else failwith "Used nolint should not be reported as unused"
 
+(* Test 24: JSON output contains all issues *)
+let test_json_output () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "unused.ml" (Filename.concat tmp_dir "unused.ml");
+  let _, output = run_analyzer ~fix:false ~json_output:true tmp_dir in
+  (* Should contain valid JSON *)
+  let json = Yojson.Safe.from_string output in
+  (* Verify structure *)
+  match json with
+  | `Assoc assoc -> (
+      match List.assoc_opt "issues" assoc with
+      | Some (`List issues) ->
+          if List.length issues >= 1 then ()
+          else failwith "Expected at least one issue in JSON"
+      | _ -> failwith "Expected issues array")
+  | _ -> failwith "Expected JSON object"
+
+(* Test 25: JSON output with no issues *)
+let test_json_output_no_issues () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "all_used.ml" (Filename.concat tmp_dir "all_used.ml");
+  let _, output = run_analyzer ~fix:false ~json_output:true tmp_dir in
+  let json = Yojson.Safe.from_string output in
+  match json with
+  | `Assoc assoc -> (
+      match List.assoc_opt "summary" assoc with
+      | Some (`Assoc summary) -> (
+          match List.assoc_opt "total_issues" summary with
+          | Some (`Int 0) -> ()
+          | _ -> failwith "Expected 0 total issues")
+      | _ -> failwith "Expected summary object")
+  | _ -> failwith "Expected JSON object"
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -533,4 +566,9 @@ let () =
         [ test_case "detects unused nolint" `Quick test_unused_nolint ] );
       ( "Used nolint validation",
         [ test_case "used nolint not reported" `Quick test_used_nolint ] );
+      ( "JSON output",
+        [
+          test_case "contains all issues" `Quick test_json_output;
+          test_case "no issues" `Quick test_json_output_no_issues;
+        ] );
     ]

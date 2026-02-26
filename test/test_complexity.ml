@@ -92,6 +92,7 @@ let test_low_complexity () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -122,6 +123,7 @@ let test_high_complexity () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -148,6 +150,7 @@ let test_complexity_disabled () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -176,6 +179,7 @@ let test_both_enabled () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -205,6 +209,7 @@ let test_if_and_try_complexity () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -240,6 +245,7 @@ let test_match_case_count () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -270,6 +276,7 @@ let test_try_handler_count () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -293,6 +300,7 @@ let test_simple_function_complexity () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -318,6 +326,7 @@ let test_record_complexity () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in
@@ -346,6 +355,7 @@ let test_threshold_reported () =
         length_enabled = false;
         length_threshold = 50;
         unused_nolint_enabled = false;
+        json_output = false;
       }
   in
   let _, output = run_analyzer ~config tmp_dir in

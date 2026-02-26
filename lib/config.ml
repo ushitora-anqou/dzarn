@@ -12,6 +12,7 @@ type t = {
   length_enabled : bool;
   length_threshold : int;
   unused_nolint_enabled : bool;
+  json_output : bool;
 }
 [@@deriving sexp]
 
@@ -24,6 +25,7 @@ let default =
     length_enabled = true;
     length_threshold = 50;
     unused_nolint_enabled = true;
+    json_output = false;
   }
 
 let parse_file filename =

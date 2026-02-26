@@ -193,11 +193,15 @@ let collect_length parse_ml module_name ?(usage_tracker = None) files =
   List.rev !results
 
 (* Find functions exceeding line count threshold *)
-let find_long_functions threshold all_lengths =
-  List.filter (fun issue -> issue.line_count > threshold) all_lengths
+let find_long_functions (threshold : int)
+    (all_lengths : Types.length_issue list) : Types.length_issue list =
+  List.filter
+    (fun (issue : Types.length_issue) -> issue.line_count > threshold)
+    all_lengths
 
 (* Report functions that exceed the line count threshold *)
-let report_length_with_threshold threshold issues =
+let report_length_with_threshold (threshold : int)
+    (issues : Types.length_issue list) : unit =
   List.iter
     (fun issue ->
       Printf.printf "Function '%s' has %d lines (threshold: %d) in %s:%d\n"

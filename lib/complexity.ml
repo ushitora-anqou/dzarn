@@ -217,12 +217,16 @@ let collect_complexity parse_ml module_name ?(usage_tracker = None) files =
   !results
 
 (* Find functions exceeding threshold *)
-let find_complex_functions threshold all_complexities =
-  List.filter (fun issue -> issue.Types.complexity > threshold) all_complexities
+let find_complex_functions (threshold : int)
+    (all_complexities : Types.complexity_issue list) :
+    Types.complexity_issue list =
+  List.filter
+    (fun (issue : Types.complexity_issue) -> issue.Types.complexity > threshold)
+    all_complexities
 
 (* Report complex functions with threshold *)
-let report_complex_with_threshold threshold
-    (issues : Types.complexity_issue list) =
+let report_complex_with_threshold (threshold : int)
+    (issues : Types.complexity_issue list) : unit =
   List.iter
     (fun (issue : Types.complexity_issue) ->
       Printf.printf "Function '%s' has complexity %d (threshold: %d) in %s:%d\n"

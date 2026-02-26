@@ -22,6 +22,7 @@ depends: [
   "ppx_sexp_conv" {>= "v0.17.1"}
   "ppx_string_interpolation" {>= "1.1.0"}
   "sexplib" {>= "v0.17.0"}
+  "yojson" {>= "3.0.0"}
 ]
 build: [
   ["dune" "subst"] {dev}

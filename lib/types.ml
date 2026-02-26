@@ -36,3 +36,30 @@ type unused_nolint = {
 }
 
 type unused_nolint_result = { unused_suppressions : unused_nolint list }
+
+(* JSON output types *)
+type json_issue = {
+  issue_type : string; (* "unused_function", "complexity", "naming", "length" *)
+  file : string;
+  line : int;
+  column : int;
+  message : string;
+  (* Optional fields depending on issue type *)
+  module_name : string option;
+  function_name : string option;
+  name : string option; (* for naming violations *)
+  violation_type : string option; (* for naming violations *)
+  complexity : int option;
+  threshold : int option;
+  line_count : int option;
+}
+
+type json_output_summary = {
+  total_issues : int;
+  unused_functions : int;
+  complexity : int;
+  naming : int;
+  length : int;
+}
+
+type json_output = { issues : json_issue list; summary : json_output_summary }

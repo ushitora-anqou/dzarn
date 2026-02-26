@@ -1,5 +1,7 @@
 (* Naming convention linter *)
 
+open Types
+
 (* Nolint suppression support *)
 type suppression_state = {
   suppressed_linters_by_line : (int * Nolint.linter list) list;
@@ -66,7 +68,7 @@ let is_uppercase_snake_case s =
 
 (* Helper to create a naming violation *)
 let make_violation name loc violation_type file =
-  { Types.name; Types.loc; Types.violation_type; Types.source_file = file }
+  { name; loc; violation_type; source_file = file }
 
 (* Check if a name is private (starts with underscore) *)
 let is_private_name name = String.length name > 0 && name.[0] = '_'
@@ -78,7 +80,7 @@ let check_poly_variant_name state violations name loc file =
     if not (is_suppressed_and_track state loc) then
       let violation_loc =
         {
-          Types.file = loc.Ppxlib.Location.loc_start.pos_fname;
+          file = loc.Ppxlib.Location.loc_start.pos_fname;
           line = loc.Ppxlib.Location.loc_start.pos_lnum;
           column =
             loc.Ppxlib.Location.loc_start.pos_cnum
@@ -118,7 +120,7 @@ let rec check_pattern state violations file = function
         if not (is_lowercase_snake_case name) then
           let ppxlib_loc =
             {
-              Types.file = loc.Ppxlib.Location.loc_start.pos_fname;
+              file = loc.Ppxlib.Location.loc_start.pos_fname;
               line = loc.Ppxlib.Location.loc_start.pos_lnum;
               column =
                 loc.Ppxlib.Location.loc_start.pos_cnum
@@ -150,7 +152,7 @@ let rec check_pattern state violations file = function
         if not (is_lowercase_snake_case name) then (
           let ppxlib_loc =
             {
-              Types.file = pat.Ppxlib.Parsetree.ppat_loc.loc_start.pos_fname;
+              file = pat.Ppxlib.Parsetree.ppat_loc.loc_start.pos_fname;
               line = pat.Ppxlib.Parsetree.ppat_loc.loc_start.pos_lnum;
               column =
                 pat.Ppxlib.Parsetree.ppat_loc.loc_start.pos_cnum
@@ -304,7 +306,7 @@ let check_type_decl state violations file
             if not (is_suppressed_and_track state pcd_loc) then
               let loc =
                 {
-                  Types.file = pcd_loc.loc_start.pos_fname;
+                  file = pcd_loc.loc_start.pos_fname;
                   line = pcd_loc.loc_start.pos_lnum;
                   column =
                     pcd_loc.loc_start.pos_cnum - pcd_loc.loc_start.pos_bol;
@@ -357,7 +359,8 @@ let check_structure_item state violations file = function
   | _ -> ()
 
 (* Collect all naming violations from files *)
-let collect_naming_violations parse_ml ?(usage_tracker = None) files =
+let collect_naming_violations parse_ml ?(usage_tracker = None) files :
+    naming_violation list =
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let violations = ref [] in
   List.iter
@@ -373,12 +376,11 @@ let collect_naming_violations parse_ml ?(usage_tracker = None) files =
   List.rev !violations
 
 (* Report naming violations *)
-let report_naming_violations violations =
+let report_naming_violations (violations : naming_violation list) : unit =
   List.iter
-    (fun violation ->
-      Printf.printf "Naming violation: %s at %s:%d:%d\n%s\n"
-        violation.Types.name violation.Types.source_file
-        violation.Types.loc.line violation.Types.loc.column
-        violation.Types.violation_type)
+    (fun (violation : naming_violation) ->
+      Printf.printf "Naming violation: %s at %s:%d:%d\n%s\n" violation.name
+        violation.source_file violation.loc.line violation.loc.column
+        violation.violation_type)
     violations;
   flush stdout

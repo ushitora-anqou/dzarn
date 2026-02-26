@@ -561,7 +561,7 @@ let apply_fix (file : string) (unused : Types.func_def list) : unit =
       close_out oc
 
 (* Main run function with config *)
-let run ~fix ~config dir =
+let run ~fix ~config ?(json_output = config.Config.json_output) dir =
   let files = find_ocaml_files dir in
   if files = [] then (
     Printf.printf "No OCaml files found in %s\n" dir;
@@ -569,6 +569,7 @@ let run ~fix ~config dir =
     0)
   else
     let exit_code = ref 0 in
+    let all_issues = ref [] in
 
     (* Create usage tracker if unused_nolint checking is enabled *)
     let usage_tracker =
@@ -595,9 +596,14 @@ let run ~fix ~config dir =
       let usages = collect_usages files in
       let unused = find_unused functions usages in
 
-      if unused = [] then Printf.printf "No unused public functions found.\n"
+      if unused = [] then (
+        if not json_output then
+          Printf.printf "No unused public functions found.\n")
       else (
-        report_unused unused;
+        if not json_output then report_unused unused;
+        List.iter
+          (fun u -> all_issues := Json_reporter.unused_to_json u :: !all_issues)
+          unused;
         exit_code := 1);
 
       flush stdout;
@@ -616,7 +622,8 @@ let run ~fix ~config dir =
         in
 
         List.iter (fun (file, defs) -> apply_fix file defs) by_file;
-        Printf.printf "Fixed %d file(s).\n" (List.length by_file);
+        if not json_output then
+          Printf.printf "Fixed %d file(s).\n" (List.length by_file);
         flush stdout));
 
     (* Run naming checker if enabled *)
@@ -624,36 +631,51 @@ let run ~fix ~config dir =
       let violations =
         Naming.collect_naming_violations parse_ml_file ~usage_tracker files
       in
-      if violations = [] then
-        Printf.printf "No naming convention violations found.\n"
+      if violations = [] then (
+        if not json_output then
+          Printf.printf "No naming convention violations found.\n")
       else (
-        Naming.report_naming_violations violations;
+        if not json_output then Naming.report_naming_violations violations;
+        List.iter
+          (fun v -> all_issues := Json_reporter.naming_to_json v :: !all_issues)
+          violations;
         exit_code := 1);
       flush stdout)
-    else
+    else if
       (* If naming is not enabled, print a message *)
-      Printf.printf "Naming checking disabled.\n";
+      not json_output
+    then Printf.printf "Naming checking disabled.\n";
 
     (* Run complexity checker if enabled *)
     if config.Config.complexity_enabled then (
-      let complexities =
+      let complexities : Types.complexity_issue list =
         Complexity.collect_complexity parse_ml_file module_name_of_file
           ~usage_tracker files
       in
-      let complex_funcs =
+      let complex_funcs : Types.complexity_issue list =
         Complexity.find_complex_functions config.Config.complexity_threshold
           complexities
       in
-      if complex_funcs = [] then
-        Printf.printf "No functions exceed complexity threshold.\n"
+      if complex_funcs = [] then (
+        if not json_output then
+          Printf.printf "No functions exceed complexity threshold.\n")
       else (
-        Complexity.report_complex_with_threshold
-          config.Config.complexity_threshold complex_funcs;
+        if not json_output then
+          Complexity.report_complex_with_threshold
+            config.Config.complexity_threshold complex_funcs;
+        List.iter
+          (fun f ->
+            all_issues :=
+              Json_reporter.complexity_to_json
+                config.Config.complexity_threshold f
+              :: !all_issues)
+          complex_funcs;
         exit_code := 1);
       flush stdout)
-    else
+    else if
       (* If complexity is not enabled, print a message *)
-      Printf.printf "Complexity checking disabled.\n";
+      not json_output
+    then Printf.printf "Complexity checking disabled.\n";
 
     (* Run length checker if enabled *)
     if config.Config.length_enabled then (
@@ -664,16 +686,25 @@ let run ~fix ~config dir =
       let long_funcs =
         Length.find_long_functions config.Config.length_threshold lengths
       in
-      if long_funcs = [] then
-        Printf.printf "No functions exceed line count threshold.\n"
+      if long_funcs = [] then (
+        if not json_output then
+          Printf.printf "No functions exceed line count threshold.\n")
       else (
-        Length.report_length_with_threshold config.Config.length_threshold
+        if not json_output then
+          Length.report_length_with_threshold config.Config.length_threshold
+            long_funcs;
+        List.iter
+          (fun f ->
+            all_issues :=
+              Json_reporter.length_to_json config.Config.length_threshold f
+              :: !all_issues)
           long_funcs;
         exit_code := 1);
       flush stdout)
-    else
+    else if
       (* If length is not enabled, print a message *)
-      Printf.printf "Length checking disabled.\n";
+      not json_output
+    then Printf.printf "Length checking disabled.\n";
 
     (* Check for unused nolints *)
     (if config.Config.unused_nolint_enabled then
@@ -683,19 +714,43 @@ let run ~fix ~config dir =
            let unused = Nolint.find_unused_nolints tracker in
            if unused <> [] then (
              (* Report unused nolints *)
-             List.iter
-               (fun (line, column, linter_names, _attr_type) ->
-                 (* We need to figure out which file this nolint is in *)
-                 (* For now, we'll report a generic message *)
-                 Printf.printf
-                   "Unused nolint directive at line %d:%d\n\
-                   \  The [@@@nolint] attribute does not suppress any \
-                    violations for linters: %s\n"
-                   line column
-                   (String.concat ", " linter_names))
-               unused;
+             if not json_output then
+               List.iter
+                 (fun (line, column, linter_names, _attr_type) ->
+                   (* We need to figure out which file this nolint is in *)
+                   (* For now, we'll report a generic message *)
+                   Printf.printf
+                     "Unused nolint directive at line %d:%d\n\
+                     \  The [@@@nolint] attribute does not suppress any \
+                      violations for linters: %s\n"
+                     line column
+                     (String.concat ", " linter_names))
+                 unused;
+             (* Note: unused nolints are not included in JSON output
+                as they are metadata about the linting process itself,
+                not code issues. *)
              exit_code := 1)
-           else Printf.printf "No unused nolint directives found.\n");
+           else if not json_output then
+             Printf.printf "No unused nolint directives found.\n");
     flush stdout;
+
+    (* Output JSON if requested *)
+    (if json_output then
+       let json_output_data =
+         {
+           Types.issues = List.rev !all_issues;
+           summary =
+             {
+               Types.total_issues = List.length !all_issues;
+               Types.unused_functions =
+                 Json_reporter.count_by_type "unused_function" !all_issues;
+               Types.complexity =
+                 Json_reporter.count_by_type "complexity" !all_issues;
+               Types.naming = Json_reporter.count_by_type "naming" !all_issues;
+               Types.length = Json_reporter.count_by_type "length" !all_issues;
+             };
+         }
+       in
+       Json_reporter.print_json json_output_data);
 
     !exit_code

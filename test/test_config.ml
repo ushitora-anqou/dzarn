@@ -19,7 +19,9 @@ let test_default_config () =
   if default.Config.length_threshold = 50 then ()
   else failwith "Default: length_threshold should be 50";
   if default.Config.unused_nolint_enabled then ()
-  else failwith "Default: unused_nolint_enabled should be true"
+  else failwith "Default: unused_nolint_enabled should be true";
+  if not default.Config.json_output then ()
+  else failwith "Default: json_output should be false"
 
 (* Test 2: Parse full config *)
 let test_parse_full () =
@@ -27,7 +29,7 @@ let test_parse_full () =
     Config.parse_string
       "((unused_enabled false) (complexity_enabled true) (complexity_threshold \
        15) (naming_enabled false) (length_enabled true) (length_threshold 100) \
-       (unused_nolint_enabled false))"
+       (unused_nolint_enabled false) (json_output true))"
   in
   if config.Config.unused_enabled then
     failwith "Full: unused_enabled should be false"
@@ -43,6 +45,8 @@ let test_parse_full () =
     failwith "Full: length_threshold should be 100"
   else if config.Config.unused_nolint_enabled then
     failwith "Full: unused_nolint_enabled should be false"
+  else if not config.Config.json_output then
+    failwith "Full: json_output should be true"
   else ()
 
 (* Test 3: Parse with comments *)
@@ -52,7 +56,7 @@ let test_parse_with_comments () =
       "; This is a comment\n\
        ((unused_enabled true) (complexity_enabled true) (complexity_threshold \
        10) (naming_enabled true) (length_enabled true) (length_threshold 50) \
-       (unused_nolint_enabled true))"
+       (unused_nolint_enabled true) (json_output false))"
   in
   if config.Config.unused_enabled then ()
   else failwith "Comments: unused_enabled should be true"

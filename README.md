@@ -60,6 +60,7 @@ dzarn [OPTIONS] <project-directory>
 Options:
   -c <file>, --config <file>    Specify configuration file (default: dzarn.sexp)
   --fix                         Remove unused functions automatically
+  --json                        Output results in JSON format
   -v, --verbose                 Enable verbose output
   --help                        Show help message
 ```
@@ -74,7 +75,9 @@ Configure dzarn using a sexp-format configuration file (default: `dzarn.sexp`):
  (complexity_threshold 10)
  (naming_enabled true)
  (length_enabled true)
- (length_threshold 50))
+ (length_threshold 50)
+ (unused_nolint_enabled true)
+ (json_output false))
 ```
 
 **Configuration options:**
@@ -88,6 +91,7 @@ Configure dzarn using a sexp-format configuration file (default: `dzarn.sexp`):
 | `length_enabled` | bool | `true` | Enable/disable function length checking |
 | `length_threshold` | int | `50` | Maximum number of lines before reporting |
 | `unused_nolint_enabled` | bool | `true` | Enable/disable unused nolint directive detection |
+| `json_output` | bool | `false` | Enable JSON output format |
 
 ### Output Examples
 
@@ -109,6 +113,106 @@ No unused nolint directives found.
 **Exit codes:**
 - `0` - No issues found
 - `1` - Issues were detected
+
+### JSON Output
+
+dzarn supports outputting results in JSON format for programmatic consumption in CI/CD pipelines or other tools.
+
+#### Using JSON Output
+
+```bash
+dzarn --json <project-directory>
+```
+
+#### JSON Format
+
+The JSON output contains an array of issues and a summary:
+
+```json
+{
+  "issues": [
+    {
+      "type": "unused_function",
+      "file": "src/util.ml",
+      "line": 42,
+      "column": 0,
+      "message": "Unused function 'helper'",
+      "module": "Util",
+      "function": "helper"
+    },
+    {
+      "type": "complexity",
+      "file": "src/lib.ml",
+      "line": 50,
+      "column": 0,
+      "message": "Function 'complex_func' has complexity 15 (threshold: 10)",
+      "module": "Lib",
+      "function": "complex_func",
+      "complexity": 15,
+      "threshold": 10
+    },
+    {
+      "type": "naming",
+      "file": "src/utils.ml",
+      "line": 5,
+      "column": 4,
+      "message": "variable/function name should be lowercase snake_case",
+      "name": "camelCase",
+      "violation_type": "variable/function name should be lowercase snake_case"
+    },
+    {
+      "type": "length",
+      "file": "src/processor.ml",
+      "line": 120,
+      "column": 0,
+      "message": "Function 'long_function' has 75 lines (threshold: 50)",
+      "module": "Processor",
+      "function": "long_function",
+      "line_count": 75,
+      "threshold": 50
+    }
+  ],
+  "summary": {
+    "total_issues": 4,
+    "unused_functions": 1,
+    "complexity": 1,
+    "naming": 1,
+    "length": 1
+  }
+}
+```
+
+#### Issue Types
+
+| Type | Description | Optional Fields |
+|------|-------------|-----------------|
+| `unused_function` | Unused public function | `module`, `function` |
+| `complexity` | Function exceeds complexity threshold | `module`, `function`, `complexity`, `threshold` |
+| `naming` | Naming convention violation | `name`, `violation_type` |
+| `length` | Function exceeds line count threshold | `module`, `function`, `line_count`, `threshold` |
+
+#### Using with jq
+
+You can pipe the JSON output to `jq` for filtering and formatting:
+
+```bash
+# Show only unused functions
+dzarn --json src/ | jq '.issues[] | select(.type == "unused_function")'
+
+# Show summary only
+dzarn --json src/ | jq '.summary'
+
+# Format as a table
+dzarn --json src/ | jq -r '.issues[] | [.type, .file, .line, .message] | @tsv'
+```
+
+#### Configuration
+
+JSON output can also be enabled via the configuration file:
+
+```sexp
+((json_output true))
+```
 
 ### `--fix` Option
 
