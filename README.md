@@ -232,6 +232,81 @@ exception Good_exception          (* ✅ Valid *)
 let _privateHelper x = x         (* ✅ Not checked *)
 ```
 
+## Suppressing Linters with `[@nolint]` Attributes
+
+dzarn supports three types of `nolint` attributes to selectively disable linters for specific parts of your code.
+
+### Attribute Types
+
+| Attribute | Syntax | Scope | Example |
+|-----------|--------|-------|---------|
+| Expression-level | `[@nolint "..."]` | Suppresses linter for the specific expression/pattern | `let (badVar [@nolint "naming"]) = ...` |
+| Item-level | `[@@nolint "..."]` | Suppresses linter for the entire structure item | `let func x = x + 1 [@@nolint "naming"]` |
+| File-level | `[@@@nolint "..."]` | Suppresses linter for all subsequent items in the file | `[@@@nolint "naming"]` |
+
+### Supported Linter Names
+
+You can specify one or more linters to disable:
+
+| Linter Name | Description |
+|-------------|-------------|
+| `"naming"` | Naming convention linter |
+| `"complexity"` | Cyclomatic complexity checker |
+| `"length"` | Function length checker |
+| `"unused"` | Unused function detector |
+| `"all"` | All linters |
+
+### Examples
+
+#### Expression-level `[@nolint "..."]`
+
+Suppress linter for a specific variable or expression:
+
+```ocaml
+let test_function () =
+  let (badLocal [@nolint "naming"]) = 5 in  (* Only badLocal is suppressed *)
+  badLocal + 1
+```
+
+#### Item-level `[@@nolint "..."]`
+
+Suppress linter for an entire function definition:
+
+```ocaml
+let anotherBadFunction x = x + 3 [@@nolint "naming"]  (* Entire function is suppressed *)
+
+(* This is NOT suppressed *)
+let camelCaseFunction x = x + 2  (* Will be reported *)
+```
+
+#### File-level `[@@@nolint "..."]`
+
+Suppress linter for all subsequent items in the file:
+
+```ocaml
+[@@@nolint "naming"]  (* Suppresses naming violations for all code below *)
+
+let shouldBeSuppressed1 x = x + 1  (* Not reported *)
+let shouldBeSuppressed2 y = y * 2  (* Not reported *)
+let alsoSuppressed z = z + 3      (* Not reported *)
+```
+
+#### Multiple Linters
+
+Disable multiple linters at once:
+
+```ocaml
+let complexFunction x [@@nolint "naming" "complexity"] =
+  let (badVar [@nolint "naming" "length"]) = x in
+  badVar + 1
+```
+
+#### Disable All Linters
+
+```ocaml
+[@@@nolint "all"]  (* Disables all linters for the rest of the file *)
+```
+
 ## Limitations
 
 ### Polymorphic Variants

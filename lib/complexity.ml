@@ -1,5 +1,15 @@
 (* Cyclomatic complexity calculator *)
 
+(* Nolint suppression support *)
+type suppression_state = {
+  suppressed_linters_by_line : (int * Nolint.linter list) list;
+}
+
+(* Check if a location is suppressed for the complexity linter *)
+let is_suppressed state loc =
+  Nolint.is_location_suppressed state.suppressed_linters_by_line loc
+    Nolint.Complexity
+
 (* Calculate cyclomatic complexity of an expression *)
 (* Base complexity is 1, additional complexity for decision points *)
 let rec complexity_of_expr = function
@@ -137,51 +147,37 @@ let rec complexity_of_expr = function
   | _ -> 1
 
 (* Calculate complexity of a structure item *)
-let complexity_of_structure_item mod_name file item :
+let complexity_of_structure_item state mod_name file item :
     Types.complexity_issue list =
   match item.Ppxlib.Parsetree.pstr_desc with
   | Pstr_value (_, bindings) ->
-      List.map
+      List.filter_map
         (fun binding ->
           match binding.Ppxlib.Parsetree.pvb_pat.Ppxlib.Parsetree.ppat_desc with
           | Ppat_var { txt = name; _ } ->
-              ({
-                 id =
-                   {
-                     Types.module_name = mod_name;
-                     name;
-                     loc =
+              let loc = binding.pvb_pat.ppat_loc in
+              (* Check if suppressed by nolint attribute *)
+              if is_suppressed state loc then None
+              else
+                Some
+                  ({
+                     id =
                        {
-                         Types.file;
-                         line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
-                         column =
-                           binding.pvb_pat.ppat_loc.loc_start.pos_cnum
-                           - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
+                         Types.module_name = mod_name;
+                         name;
+                         loc =
+                           {
+                             Types.file;
+                             line = loc.loc_start.pos_lnum;
+                             column =
+                               loc.loc_start.pos_cnum - loc.loc_start.pos_bol;
+                           };
                        };
-                   };
-                 complexity = complexity_of_expr binding.pvb_expr;
-                 source_file = file;
-               }
-                : Types.complexity_issue)
-          | _ ->
-              ({
-                 id =
-                   {
-                     Types.module_name = mod_name;
-                     name = "<unknown>";
-                     loc =
-                       {
-                         Types.file;
-                         line = binding.pvb_pat.ppat_loc.loc_start.pos_lnum;
-                         column =
-                           binding.pvb_pat.ppat_loc.loc_start.pos_cnum
-                           - binding.pvb_pat.ppat_loc.loc_start.pos_bol;
-                       };
-                   };
-                 complexity = complexity_of_expr binding.pvb_expr;
-                 source_file = file;
-               }
-                : Types.complexity_issue))
+                     complexity = complexity_of_expr binding.pvb_expr;
+                     source_file = file;
+                   }
+                    : Types.complexity_issue)
+          | _ -> None)
         bindings
   | _ -> []
 
@@ -195,10 +191,13 @@ let collect_complexity parse_ml module_name files =
       | Result.Error _ -> ()
       | Result.Ok ast ->
           let mod_name = module_name file in
+          (* Collect nolint suppressions for this file *)
+          let suppressed_linters_by_line = Nolint.collect_suppressions ast in
+          let state = { suppressed_linters_by_line } in
           List.iter
             (fun item ->
               let complexities =
-                complexity_of_structure_item mod_name file item
+                complexity_of_structure_item state mod_name file item
               in
               results := complexities @ !results)
             ast)

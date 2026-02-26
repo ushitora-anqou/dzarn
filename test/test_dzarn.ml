@@ -425,6 +425,38 @@ let test_naming_with_unused () =
     else failwith "Expected unused_naming_function to be reported"
   else failwith "Expected CamelCase to be reported as naming violation"
 
+(* Test 20: Nolint attributes suppress linters *)
+let test_nolint_attributes () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "nolint.ml" (Filename.concat tmp_dir "nolint.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Check that badLocal is NOT reported as naming violation (suppressed by [@nolint "naming"]) *)
+  if string_contains output "Naming violation: badLocal" then
+    failwith "badLocal should be suppressed by [@nolint \"naming\"]"
+    (* Check that anotherBadFunction is NOT reported as naming violation (suppressed by [@@nolint "naming"]) *)
+  else if string_contains output "Naming violation: anotherBadFunction" then
+    failwith "anotherBadFunction should be suppressed by [@@nolint \"naming\"]"
+    (* Check that camelCaseFunction IS reported as naming violation (not suppressed) *)
+  else if not (string_contains output "camelCaseFunction") then
+    failwith "camelCaseFunction should be reported as naming violation"
+  else ()
+
+(* Test 21: File-level nolint attributes [@@@nolint "..."] suppress all subsequent items *)
+let test_nolint_atatat_attributes () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "nolint_atatat.ml" (Filename.concat tmp_dir "nolint_atatat.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Check that shouldBeSuppressed1, shouldBeSuppressed2, and alsoSuppressed are NOT reported *)
+  if string_contains output "Naming violation: shouldBeSuppressed1" then
+    failwith
+      "shouldBeSuppressed1 should be suppressed by [@@@nolint \"naming\"]"
+  else if string_contains output "Naming violation: shouldBeSuppressed2" then
+    failwith
+      "shouldBeSuppressed2 should be suppressed by [@@@nolint \"naming\"]"
+  else if string_contains output "Naming violation: alsoSuppressed" then
+    failwith "alsoSuppressed should be suppressed by [@@@nolint \"naming\"]"
+  else ()
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -470,4 +502,13 @@ let () =
         [ test_case "accepts good names" `Quick test_naming_valid ] );
       ( "Combined linters",
         [ test_case "naming with unused" `Quick test_naming_with_unused ] );
+      ( "Nolint attributes",
+        [
+          test_case "suppress linters with nolint" `Quick test_nolint_attributes;
+        ] );
+      ( "File-level nolint attributes",
+        [
+          test_case "suppress all subsequent items" `Quick
+            test_nolint_atatat_attributes;
+        ] );
     ]
