@@ -1,115 +1,153 @@
 (* Cyclomatic complexity calculator *)
 
-open Types
-open Stdlib
-open Ppxlib.Parsetree
-open Ppxlib.Location
-
 (* Calculate cyclomatic complexity of an expression *)
 (* Base complexity is 1, additional complexity for decision points *)
 let rec complexity_of_expr = function
-  | { pexp_desc = Pexp_construct (_, payload); _ } -> (
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_construct (_, payload);
+      _;
+    } -> (
       match payload with Some e -> complexity_of_expr e | None -> 1)
-  | { pexp_desc = Pexp_tuple items; _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_tuple items; _ } ->
       (* Tuple doesn't add complexity *)
-      List.fold_left (fun acc e -> max acc (complexity_of_expr e)) 1 items
-  | { pexp_desc = Pexp_record (fields, _); _ } ->
+      Stdlib.List.fold_left
+        (fun acc e -> max acc (complexity_of_expr e))
+        1 items
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_record (fields, _); _ }
+    ->
       (* Record doesn't add complexity *)
-      List.fold_left
+      Stdlib.List.fold_left
         (fun acc (_label, expr) -> max acc (complexity_of_expr expr))
         1 fields
-  | { pexp_desc = Pexp_array items; _ } ->
-      List.fold_left (fun acc e -> max acc (complexity_of_expr e)) 1 items
-  | { pexp_desc = Pexp_ifthenelse (e1, e2, e3); _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_array items; _ } ->
+      Stdlib.List.fold_left
+        (fun acc e -> max acc (complexity_of_expr e))
+        1 items
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_ifthenelse (e1, e2, e3);
+      _;
+    } ->
       (* if-then-else: condition + branches, adds 1 for the decision *)
       1
       + max (complexity_of_expr e1)
           (max (complexity_of_expr e2)
              (match e3 with Some e -> complexity_of_expr e | None -> 1))
-  | { pexp_desc = Pexp_sequence (e1, e2); _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_sequence (e1, e2); _ }
+    ->
       (* Sequence doesn't add complexity, take max *)
       max (complexity_of_expr e1) (complexity_of_expr e2)
-  | { pexp_desc = Pexp_while (e1, e2); _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_while (e1, e2); _ } ->
       (* While loop adds 1 *)
       1 + max (complexity_of_expr e1) (complexity_of_expr e2)
-  | { pexp_desc = Pexp_for (_, _, _, _, e); _ } ->
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_for (_, _, _, _, e);
+      _;
+    } ->
       (* For loop adds 1 *)
       1 + complexity_of_expr e
-  | { pexp_desc = Pexp_match (e, cases); _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_match (e, cases); _ }
+    ->
       (* Match adds 1 for the decision point *)
       let case_complexity =
-        List.fold_left
+        Stdlib.List.fold_left
           (fun acc c ->
             max acc
-              (complexity_of_expr c.pc_rhs
-              + (function Some _ -> 1 | None -> 0) c.pc_guard))
+              (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
+              + (function Some _ -> 1 | None -> 0) c.Ppxlib.Parsetree.pc_guard))
           1 cases
       in
       max (complexity_of_expr e) (1 + case_complexity)
-  | { pexp_desc = Pexp_try (e, cases); _ } ->
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_try (e, cases); _ } ->
       (* Try-with adds 1 for the decision point *)
       let handler_complexity =
-        List.fold_left
+        Stdlib.List.fold_left
           (fun acc c ->
             max acc
-              (complexity_of_expr c.pc_rhs
-              + (function Some _ -> 1 | None -> 0) c.pc_guard))
+              (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
+              + (function Some _ -> 1 | None -> 0) c.Ppxlib.Parsetree.pc_guard))
           1 cases
       in
       max (complexity_of_expr e) (1 + handler_complexity)
-  | { pexp_desc = Pexp_function (_, _, body); _ } -> (
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_function (_, _, body);
+      _;
+    } -> (
       match body with
-      | Pfunction_body e -> complexity_of_expr e
-      | Pfunction_cases (cases, _, _) ->
+      | Ppxlib.Parsetree.Pfunction_body e -> complexity_of_expr e
+      | Ppxlib.Parsetree.Pfunction_cases (cases, _, _) ->
           (* Function match adds 1 for the decision point *)
           let case_complexity =
-            List.fold_left
+            Stdlib.List.fold_left
               (fun acc c ->
                 max acc
-                  (complexity_of_expr c.pc_rhs
-                  + (function Some _ -> 1 | None -> 0) c.pc_guard))
+                  (complexity_of_expr c.Ppxlib.Parsetree.pc_rhs
+                  + (function Some _ -> 1 | None -> 0)
+                      c.Ppxlib.Parsetree.pc_guard))
               1 cases
           in
           1 + case_complexity)
-  | { pexp_desc = Pexp_apply (e, args); _ } ->
-      List.fold_left
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_apply (e, args); _ } ->
+      Stdlib.List.fold_left
         (fun acc (_, arg) -> max acc (complexity_of_expr arg))
         (complexity_of_expr e) args
-  | { pexp_desc = Pexp_let (_, bindings, e); _ } ->
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_let (_, bindings, e);
+      _;
+    } ->
       let bindings_complexity =
-        List.fold_left
-          (fun acc binding -> max acc (complexity_of_expr binding.pvb_expr))
+        Stdlib.List.fold_left
+          (fun acc binding ->
+            max acc (complexity_of_expr binding.Ppxlib.Parsetree.pvb_expr))
           1 bindings
       in
       max bindings_complexity (complexity_of_expr e)
-  | { pexp_desc = Pexp_letmodule (_, _, e); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_letexception (_, e); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_assert e; _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_lazy e; _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_poly (e, _); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_open (_, e); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_new _; _ } -> 1
-  | { pexp_desc = Pexp_send (e, _); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_field (e, _); _ } -> complexity_of_expr e
-  | { pexp_desc = Pexp_setfield (e1, _, e2); _ } ->
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_letmodule (_, _, e);
+      _;
+    } ->
+      complexity_of_expr e
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_letexception (_, e);
+      _;
+    } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_assert e; _ } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_lazy e; _ } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_poly (e, _); _ } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_open (_, e); _ } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_new _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_send (e, _); _ } ->
+      complexity_of_expr e
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_field (e, _); _ } ->
+      complexity_of_expr e
+  | {
+      Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_setfield (e1, _, e2);
+      _;
+    } ->
       max (complexity_of_expr e1) (complexity_of_expr e2)
-  | { pexp_desc = Pexp_object _; _ } -> 1
-  | { pexp_desc = Pexp_pack _; _ } -> 1
-  | { pexp_desc = Pexp_letop _; _ } -> 1
-  | { pexp_desc = Pexp_constant _; _ } -> 1
-  | { pexp_desc = Pexp_extension (_, _); _ } -> 1
-  | { pexp_desc = Pexp_unreachable; _ } -> 1
-  | { pexp_desc = Pexp_ident _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_object _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_pack _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_letop _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_constant _; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_extension (_, _); _ }
+    ->
+      1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_unreachable; _ } -> 1
+  | { Ppxlib.Parsetree.pexp_desc = Ppxlib.Parsetree.Pexp_ident _; _ } -> 1
   | _ -> 1
 
 (* Calculate complexity of a structure item *)
 let complexity_of_structure_item mod_name file item :
     Types.complexity_issue list =
-  match item.pstr_desc with
+  match item.Ppxlib.Parsetree.pstr_desc with
   | Pstr_value (_, bindings) ->
-      List.map
+      Stdlib.List.map
         (fun binding ->
-          match binding.pvb_pat.ppat_desc with
+          match binding.Ppxlib.Parsetree.pvb_pat.Ppxlib.Parsetree.ppat_desc with
           | Ppat_var { txt = name; _ } ->
               ({
                  id =
@@ -153,15 +191,17 @@ let complexity_of_structure_item mod_name file item :
 
 (* Collect complexity for all functions in files *)
 let collect_complexity parse_ml module_name files =
-  let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
+  let ml_files =
+    Stdlib.List.filter (fun f -> Filename.check_suffix f ".ml") files
+  in
   let results = ref [] in
-  List.iter
+  Stdlib.List.iter
     (fun file ->
       match parse_ml file with
       | Result.Error _ -> ()
       | Result.Ok ast ->
           let mod_name = module_name file in
-          List.iter
+          Stdlib.List.iter
             (fun item ->
               let complexities =
                 complexity_of_structure_item mod_name file item
@@ -173,15 +213,17 @@ let collect_complexity parse_ml module_name files =
 
 (* Find functions exceeding threshold *)
 let find_complex_functions threshold all_complexities =
-  List.filter (fun issue -> issue.complexity > threshold) all_complexities
+  Stdlib.List.filter
+    (fun issue -> issue.Types.complexity > threshold)
+    all_complexities
 
 (* Report complex functions with threshold *)
 let report_complex_with_threshold threshold
     (issues : Types.complexity_issue list) =
-  List.iter
+  Stdlib.List.iter
     (fun (issue : Types.complexity_issue) ->
       Printf.printf "Function '%s' has complexity %d (threshold: %d) in %s:%d\n"
-        issue.id.name issue.complexity threshold issue.source_file
+        issue.id.name issue.Types.complexity threshold issue.source_file
         issue.id.loc.line)
     issues;
   flush stdout
