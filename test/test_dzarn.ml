@@ -706,6 +706,19 @@ let () =
     (string_contains content "Comment at the end")
     true
 
+(* Test that opened module functions don't cause false positives *)
+let test_opened_module_bug _ =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "opened_module_bug.ml"
+    (Filename.concat tmp_dir "opened_module_bug.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* unused_func should be reported as unused *)
+  if string_contains output "unused_func" then ()
+  else failwith "unused_func should be reported as unused";
+  (* map should NOT be reported as unused (it's used in the file) *)
+  if not (string_contains output "map is unused") then ()
+  else failwith "map should not be reported as unused"
+
 (* Test that --fix also updates .mli files *)
 let test_fix_with_mli _ =
   with_temp_dir @@ fun tmp_dir ->
@@ -848,6 +861,11 @@ let () =
         ] );
       ( "Fix with .mli files",
         [ test_case "removes signatures from .mli" `Quick test_fix_with_mli ] );
+      ( "Opened module bug fix",
+        [
+          test_case "handles open Module correctly" `Quick
+            test_opened_module_bug;
+        ] );
       ( "Multi-directory support",
         [
           test_case "detects cross-directory usage" `Quick

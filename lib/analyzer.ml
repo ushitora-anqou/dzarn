@@ -17,6 +17,13 @@ end
 
 module UsageSet = Set.Make (UsagePair)
 
+(* Open context for tracking opened modules *)
+(* Tracks modules opened via 'open Module' statements *)
+type open_context = {
+  mutable opened_modules : StringSet.t; (* Set of opened module names *)
+  current_module : string; (* Current module being processed *)
+}
+
 (* Convert Longident.t to string representation *)
 (* Longident.t = Lident of string | Ldot of t * string | Lapply of t * t *)
 let rec longident_to_string : Ppxlib.Longident.t -> string = function
@@ -240,6 +247,56 @@ let collect_function_definitions files =
   List.iter process_file ml_files;
   List.rev !functions
 
+(* Helper to process identifier and record usage with open context *)
+let process_ident_with_open usages open_ctx file longident =
+  match longident with
+  | { Ppxlib.Location.txt = Ppxlib.Longident.Lident name; _ } ->
+      (* Direct call: f *)
+      (* Skip common operators and builtins *)
+      if
+        name = "=" || name = "<>" || name = "+" || name = "-" || name = "*"
+        || name = "/" || name = "^" || name = "@" || name = "&" || name = "or"
+        || name = "&&" || name = "||" || name = "not" || name = "true"
+        || name = "false" || name = "()" || name = "[]" || name = "[|]"
+        || name = "::" || name = "::@"
+      then ()
+      else if
+        (* Check if this identifier might come from an opened module *)
+        (* This is a simple heuristic: if the name matches an opened module name,
+           it likely comes from that module, not the current module *)
+        StringSet.exists
+          (fun mod_name ->
+            (* For simplicity, we assume that if an identifier name matches
+             an opened module name, it comes from that module.
+             This is a conservative approach that may have false positives
+             but prevents false negatives. *)
+            String.lowercase_ascii mod_name = String.lowercase_ascii name)
+          open_ctx.opened_modules
+      then
+        (* This identifier likely comes from an opened module,
+             don't record it as current module usage *)
+        ()
+      else
+        (* Record as current module usage *)
+        usages :=
+          Types.make_func_def
+            ~id:
+              (Types.make_func_id ~module_name:open_ctx.current_module ~name
+                 ~loc:(Types.make_loc ~file ~line:0 ~column:0))
+            ~is_public:true ~source_file:file
+          :: !usages
+  | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, func_name); _ } ->
+      (* Qualified call: Module.func or A.B.func *)
+      let module_name = last_ident_of_longident prefix in
+      usages :=
+        Types.make_func_def
+          ~id:
+            (Types.make_func_id ~module_name ~name:func_name
+               ~loc:(Types.make_loc ~file ~line:0 ~column:0))
+          ~is_public:true ~source_file:file
+        :: !usages
+  | { Ppxlib.Location.txt = Ppxlib.Longident.Lapply _; _ } -> ()
+
 (* Helper to process identifier and record usage *)
 let process_ident usages mod_name file longident =
   match longident with
@@ -274,6 +331,126 @@ let process_ident usages mod_name file longident =
           ~is_public:true ~source_file:file
         :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Lapply _; _ } -> ()
+
+(* Usage tracker with open context - simple recursive traversal *)
+let rec collect_expr_with_open usages open_ctx file
+    (expr : Ppxlib.Parsetree.expression) : unit =
+  match expr.Ppxlib.Parsetree.pexp_desc with
+  | Ppxlib.Parsetree.Pexp_ident longident ->
+      process_ident_with_open usages open_ctx file longident
+  | Ppxlib.Parsetree.Pexp_tuple el ->
+      List.iter (fun e -> collect_expr_with_open usages open_ctx file e) el
+  | Ppxlib.Parsetree.Pexp_construct (_, Some e) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_construct (_, None) -> ()
+  | Ppxlib.Parsetree.Pexp_variant (_, Some e) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_record (fields, _) ->
+      List.iter
+        (fun (_, expr) -> collect_expr_with_open usages open_ctx file expr)
+        fields
+  | Ppxlib.Parsetree.Pexp_array el ->
+      List.iter (collect_expr_with_open usages open_ctx file) el
+  | Ppxlib.Parsetree.Pexp_sequence (e1, e2) ->
+      collect_expr_with_open usages open_ctx file e1;
+      collect_expr_with_open usages open_ctx file e2
+  | Ppxlib.Parsetree.Pexp_while (e1, e2) ->
+      collect_expr_with_open usages open_ctx file e1;
+      collect_expr_with_open usages open_ctx file e2
+  | Ppxlib.Parsetree.Pexp_for (_, _, _, _, e) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_let (_, ebs, e) ->
+      List.iter
+        (fun eb ->
+          collect_expr_with_open usages open_ctx file
+            eb.Ppxlib.Parsetree.pvb_expr)
+        ebs;
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_function (_, _, body) -> (
+      match body with
+      | Ppxlib.Parsetree.Pfunction_body e ->
+          collect_expr_with_open usages open_ctx file e
+      | Ppxlib.Parsetree.Pfunction_cases (cases, _, _) ->
+          List.iter
+            (fun c ->
+              Option.iter
+                (collect_expr_with_open usages open_ctx file)
+                c.Ppxlib.Parsetree.pc_guard;
+              collect_expr_with_open usages open_ctx file
+                c.Ppxlib.Parsetree.pc_rhs)
+            cases)
+  | Ppxlib.Parsetree.Pexp_match (e, cases) ->
+      collect_expr_with_open usages open_ctx file e;
+      List.iter
+        (fun c ->
+          Option.iter
+            (collect_expr_with_open usages open_ctx file)
+            c.Ppxlib.Parsetree.pc_guard;
+          collect_expr_with_open usages open_ctx file c.Ppxlib.Parsetree.pc_rhs)
+        cases
+  | Ppxlib.Parsetree.Pexp_apply (e, args) ->
+      collect_expr_with_open usages open_ctx file e;
+      List.iter
+        (fun (_, arg) -> collect_expr_with_open usages open_ctx file arg)
+        args
+  | Ppxlib.Parsetree.Pexp_ifthenelse (e1, e2, e3) ->
+      collect_expr_with_open usages open_ctx file e1;
+      collect_expr_with_open usages open_ctx file e2;
+      Option.iter (collect_expr_with_open usages open_ctx file) e3
+  | Ppxlib.Parsetree.Pexp_try (e, cases) ->
+      collect_expr_with_open usages open_ctx file e;
+      List.iter
+        (fun c ->
+          Option.iter
+            (collect_expr_with_open usages open_ctx file)
+            c.Ppxlib.Parsetree.pc_guard;
+          collect_expr_with_open usages open_ctx file c.Ppxlib.Parsetree.pc_rhs)
+        cases
+  | Ppxlib.Parsetree.Pexp_field (e, _) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_setfield (e1, _, e2) ->
+      collect_expr_with_open usages open_ctx file e1;
+      collect_expr_with_open usages open_ctx file e2
+  | Ppxlib.Parsetree.Pexp_send (e, _) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_new _ -> ()
+  | Ppxlib.Parsetree.Pexp_letmodule (_, _, e) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_letexception (_, e) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_assert e ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_lazy e ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_poly (e, _) ->
+      collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_object _ -> ()
+  | Ppxlib.Parsetree.Pexp_pack _ -> ()
+  | Ppxlib.Parsetree.Pexp_letop _ -> ()
+  | Ppxlib.Parsetree.Pexp_constant _ -> ()
+  | Ppxlib.Parsetree.Pexp_open (open_decl, e) ->
+      (* Local open: let open Module in expr or Module.(expr) *)
+      let mod_name =
+        match
+          open_decl.Ppxlib.Parsetree.popen_expr.Ppxlib.Parsetree.pmod_desc
+        with
+        | Ppxlib.Parsetree.Pmod_ident { txt = lid; _ } ->
+            longident_to_string lid
+        | _ -> ""
+      in
+      (* Temporarily add the module, process expression, then remove *)
+      if mod_name <> "" then (
+        open_ctx.opened_modules <-
+          StringSet.add mod_name open_ctx.opened_modules;
+        collect_expr_with_open usages open_ctx file e;
+        open_ctx.opened_modules <-
+          StringSet.remove mod_name open_ctx.opened_modules)
+      else
+        (* For anonymous module opens, just process the expression *)
+        collect_expr_with_open usages open_ctx file e
+  | Ppxlib.Parsetree.Pexp_extension (_, _) -> ()
+  | Ppxlib.Parsetree.Pexp_unreachable -> ()
+  | _ -> ()
 
 (* Usage tracker - simple recursive traversal *)
 let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
@@ -371,6 +548,43 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
   | Ppxlib.Parsetree.Pexp_unreachable -> ()
   | _ -> ()
 
+let rec collect_structure_with_open usages open_ctx file = function
+  | [] -> ()
+  | item :: rest ->
+      (match item.Ppxlib.Parsetree.pstr_desc with
+      | Ppxlib.Parsetree.Pstr_eval (e, _) ->
+          collect_expr_with_open usages open_ctx file e
+      | Ppxlib.Parsetree.Pstr_value (_, bindings) ->
+          List.iter
+            (fun binding ->
+              collect_expr_with_open usages open_ctx file
+                binding.Ppxlib.Parsetree.pvb_expr)
+            bindings
+      | Ppxlib.Parsetree.Pstr_primitive _ -> ()
+      | Ppxlib.Parsetree.Pstr_type _ -> ()
+      | Ppxlib.Parsetree.Pstr_typext _ -> ()
+      | Ppxlib.Parsetree.Pstr_exception _ -> ()
+      | Ppxlib.Parsetree.Pstr_module _ -> ()
+      | Ppxlib.Parsetree.Pstr_recmodule _ -> ()
+      | Ppxlib.Parsetree.Pstr_modtype _ -> ()
+      | Ppxlib.Parsetree.Pstr_open { Ppxlib.Parsetree.popen_expr; _ } ->
+          (* Top-level open statement - add module to opened set *)
+          let mod_name =
+            match popen_expr.Ppxlib.Parsetree.pmod_desc with
+            | Ppxlib.Parsetree.Pmod_ident { txt = lid; _ } ->
+                longident_to_string lid
+            | _ -> ""
+          in
+          if mod_name <> "" then
+            open_ctx.opened_modules <-
+              StringSet.add mod_name open_ctx.opened_modules
+      | Ppxlib.Parsetree.Pstr_class _ -> ()
+      | Ppxlib.Parsetree.Pstr_class_type _ -> ()
+      | Ppxlib.Parsetree.Pstr_include _ -> ()
+      | Ppxlib.Parsetree.Pstr_attribute _ -> ()
+      | Ppxlib.Parsetree.Pstr_extension _ -> ());
+      collect_structure_with_open usages open_ctx file rest
+
 let rec collect_structure usages mod_name file = function
   | [] -> ()
   | item :: rest ->
@@ -407,7 +621,10 @@ let collect_usages files =
       | Error _ -> ()
       | Ok ast ->
           let mod_name = module_name_of_file file in
-          collect_structure usages mod_name file ast)
+          let open_ctx =
+            { opened_modules = StringSet.empty; current_module = mod_name }
+          in
+          collect_structure_with_open usages open_ctx file ast)
     ml_files;
   !usages
 
