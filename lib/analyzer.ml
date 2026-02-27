@@ -409,7 +409,12 @@ let rec collect_expr_with_open usages open_ctx file
           collect_expr_with_open usages open_ctx file c.Ppxlib.Parsetree.pc_rhs)
         cases
   | Ppxlib.Parsetree.Pexp_apply (e, args) ->
-      collect_expr_with_open usages open_ctx file e;
+      (* Process the function being applied, respecting opened modules *)
+      (match e.Ppxlib.Parsetree.pexp_desc with
+      | Ppxlib.Parsetree.Pexp_ident longident ->
+          process_ident_with_open usages open_ctx file longident
+      | _ -> collect_expr_with_open usages open_ctx file e);
+      (* Process arguments *)
       List.iter
         (fun (_, arg) -> collect_expr_with_open usages open_ctx file arg)
         args
@@ -526,7 +531,12 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
           collect_expr usages mod_name file c.Ppxlib.Parsetree.pc_rhs)
         cases
   | Ppxlib.Parsetree.Pexp_apply (e, args) ->
-      collect_expr usages mod_name file e;
+      (* Process the function being applied *)
+      (match e.Ppxlib.Parsetree.pexp_desc with
+      | Ppxlib.Parsetree.Pexp_ident longident ->
+          process_ident usages mod_name file longident
+      | _ -> collect_expr usages mod_name file e);
+      (* Process arguments *)
       List.iter (fun (_, arg) -> collect_expr usages mod_name file arg) args
   | Ppxlib.Parsetree.Pexp_ifthenelse (e1, e2, e3) ->
       collect_expr usages mod_name file e1;

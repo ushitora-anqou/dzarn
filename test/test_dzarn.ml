@@ -719,6 +719,23 @@ let test_opened_module_bug _ =
   if not (string_contains output "map is unused") then ()
   else failwith "map should not be reported as unused"
 
+(* Test that pipe operator with opened modules correctly tracks function usage *)
+let test_pipe_operator_with_open _ =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "pipe_operator_with_open.ml"
+    (Filename.concat tmp_dir "pipe_operator_with_open.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* wrap_error and another_func should NOT be reported as unused *)
+  if string_contains output "Unused function 'wrap_error'" then
+    failwith
+      "wrap_error should NOT be reported as unused (used via pipe operator)"
+  else if string_contains output "Unused function 'another_func'" then
+    failwith
+      "another_func should NOT be reported as unused (used via pipe operator)"
+    (* unused_function should be reported as unused *)
+  else if string_contains output "Unused function 'unused_function'" then ()
+  else failwith "unused_function should be reported as unused"
+
 (* Test that open Module correctly tracks cross-file usage *)
 let test_open_module_cross_file _ =
   with_temp_dir @@ fun tmp_dir ->
@@ -902,6 +919,10 @@ let () =
             test_opened_module_bug;
           test_case "handles cross-file open Module correctly" `Quick
             test_open_module_cross_file;
+        ] );
+      ( "Pipe operator with opened modules",
+        [
+          test_case "tracks usage correctly" `Quick test_pipe_operator_with_open;
         ] );
       ( "Multi-directory support",
         [
