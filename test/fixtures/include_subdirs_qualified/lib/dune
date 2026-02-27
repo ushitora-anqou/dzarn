@@ -1,0 +1,4 @@
+(library
+ (name test_qualified_lib))
+
+(include_subdirs qualified)

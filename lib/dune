@@ -2,7 +2,7 @@
  (name dzarn)
  (public_name dzarn)
  (inline_tests)
- (libraries logs ppxlib sexplib yojson)
+ (libraries logs ppxlib sexplib yojson unix)
  (preprocess
   (pps
    ppx_deriving.std

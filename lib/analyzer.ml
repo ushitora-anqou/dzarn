@@ -1,4 +1,5 @@
 module Parse = Ppxlib.Parse
+module Dune_info = Dune_info
 
 (* String set module - use derived ord for comparison *)
 module String_set_key = struct
@@ -153,6 +154,81 @@ let module_name_of_file file =
   let name = Filename.chop_extension base in
   String.capitalize_ascii name
 
+(* Build mapping from source file to module name from dune info *)
+let build_module_name_map (dune_info : Dune_info.dune_info option) :
+    (string * string) list =
+  match dune_info with
+  | None -> []
+  | Some info ->
+      List.map
+        (fun unit ->
+          (* Use the basename of the source_file_part to match against actual files *)
+          (* e.g., "test/qualified/lib/Subdir/Inner" -> "Inner" *)
+          (* Match with "subdir/inner.ml" -> "Subdir.Inner" *)
+          let basename = Filename.basename unit.Dune_info.source_file in
+          (basename, unit.Dune_info.short_module_name))
+        info.Dune_info.units
+
+(* Enhanced module_name_of_file that considers dune info *)
+let module_name_of_file_with_dune (dune_map : (string * string) list)
+    (file : string) : string =
+  (* First try to infer qualified module name from file path *)
+  (* e.g., "lib/subdir/inner.ml" -> "Subdir.Inner" *)
+  let rec infer_qualified_module_name parts =
+    match parts with
+    | [] -> []
+    | "lib" :: tl ->
+        (* Start of lib directory *)
+        (* Process only files (ending with .ml) *)
+        let process_part s =
+          if Filename.check_suffix s ".ml" then
+            let name = Filename.chop_extension s in
+            String.capitalize_ascii name
+          else
+            (* It's a directory, capitalize it *)
+            String.capitalize_ascii s
+        in
+        List.map process_part tl
+    | _ :: tl -> infer_qualified_module_name tl
+  in
+
+  (* Try to infer from file path *)
+  let parts =
+    let rec split_path path =
+      if path = "" then []
+      else
+        let dir = Filename.dirname path in
+        let base = Filename.basename path in
+        if dir = path then [ base ] (* Reached root *)
+        else split_path dir @ [ base ]
+    in
+    split_path file
+  in
+
+  let inferred = infer_qualified_module_name parts in
+  if inferred <> [] then
+    let inferred_name = String.concat "." inferred in
+    inferred_name
+  else
+    (* Fallback to dune_map or original logic *)
+    (* Try to find matching module in dune_map *)
+    let file_basename = Filename.basename file in
+    let rec find_map files_map =
+      match files_map with
+      | [] -> None
+      | (pattern, module_name) :: rest ->
+          (* Check if file matches the pattern *)
+          let pattern_basename = Filename.basename pattern in
+          if
+            String.ends_with ~suffix:pattern file
+            || pattern_basename = file_basename
+          then Some module_name
+          else find_map rest
+    in
+    match find_map dune_map with
+    | Some name -> name
+    | None -> module_name_of_file file
+
 (* Collect public function signatures from .mli files *)
 let collect_mli_signatures mli_files =
   (* Returns a map from module name to set of public function names *)
@@ -202,18 +278,19 @@ let collect_mli_signatures_with_loc mli_files : Types.mli_signature list =
   !sigs
 
 (* Collect function definitions AND build module function index *)
-let collect_function_definitions_with_index files =
+let collect_function_definitions_with_index ?(dune_info = None) files =
   let functions = ref [] in
   let module_index = ref StringMap.empty in
   let mli_files = List.filter (fun f -> Filename.check_suffix f ".mli") files in
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let mli_sigs = collect_mli_signatures mli_files in
+  let module_name_map = build_module_name_map dune_info in
 
   let process_file file =
     match parse_ml_file file with
     | Error _ -> ()
     | Ok ast ->
-        let mod_name = module_name_of_file file in
+        let mod_name = module_name_of_file_with_dune module_name_map file in
         let has_mli = StringMap.mem mod_name mli_sigs in
         let mod_sigs =
           if has_mli then Some (StringMap.find mod_name mli_sigs) else None
@@ -258,8 +335,8 @@ let collect_function_definitions_with_index files =
   (List.rev !functions, !module_index)
 
 (* Function definition collector - simple traversal *)
-let collect_function_definitions files =
-  fst (collect_function_definitions_with_index files)
+let collect_function_definitions ?(dune_info = None) files =
+  fst (collect_function_definitions_with_index ~dune_info files)
 
 (* Resolve identifier in opened modules - returns the module name where it's defined *)
 (* Returns None if not found in any opened module *)
@@ -307,7 +384,8 @@ let process_ident_with_open usages open_ctx file longident =
           :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, fname); _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      let module_name' = last_ident_of_longident prefix in
+      (* Use full qualified module name *)
+      let module_name' = longident_to_string prefix in
       usages :=
         Types.make_func_def
           ~id:
@@ -340,8 +418,8 @@ let process_ident usages mod_name file longident =
           :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, func_name); _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      (* Use the last component of the module path to match module_name_of_file *)
-      let module_name = last_ident_of_longident prefix in
+      (* Use full qualified module name *)
+      let module_name = longident_to_string prefix in
       (* Track the usage with the actual module being called *)
       usages :=
         Types.make_func_def
@@ -661,19 +739,22 @@ let rec collect_structure usages mod_name file = function
       | Ppxlib.Parsetree.Pstr_extension _ -> ());
       collect_structure usages mod_name file rest
 
-let collect_usages files =
+let collect_usages ?(dune_info = None) files =
   let usages = ref [] in
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
 
   (* Build module function index first *)
-  let _, module_functions = collect_function_definitions_with_index files in
+  let _, module_functions =
+    collect_function_definitions_with_index ~dune_info files
+  in
+  let module_name_map = build_module_name_map dune_info in
 
   List.iter
     (fun file ->
       match parse_ml_file file with
       | Error _ -> ()
       | Ok ast ->
-          let mod_name = module_name_of_file file in
+          let mod_name = module_name_of_file_with_dune module_name_map file in
           let open_ctx =
             {
               opened_modules = StringSet.empty;
@@ -999,6 +1080,11 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
     let exit_code = ref 0 in
     let all_issues = ref [] in
 
+    (* Get dune info for qualified module name support *)
+    let dune_info = Dune_info.get_dune_info dirs in
+    let module_name_map = build_module_name_map dune_info in
+    let module_name_of_file' = module_name_of_file_with_dune module_name_map in
+
     (* Create usage tracker if unused_nolint checking is enabled *)
     let usage_tracker =
       if config.Config.unused_nolint_enabled then
@@ -1020,8 +1106,8 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
 
     (* Run unused function checker if enabled *)
     if config.Config.unused_enabled then (
-      let functions = collect_function_definitions files in
-      let usages = collect_usages files in
+      let functions = collect_function_definitions ~dune_info files in
+      let usages = collect_usages ~dune_info files in
       let unused = find_unused functions usages in
 
       if unused = [] then (
@@ -1094,7 +1180,7 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
     (* Run complexity checker if enabled *)
     if config.Config.complexity_enabled then (
       let complexities : Types.complexity_issue list =
-        Complexity.collect_complexity parse_ml_file module_name_of_file
+        Complexity.collect_complexity parse_ml_file module_name_of_file'
           ~usage_tracker files
       in
       let complex_funcs : Types.complexity_issue list =
@@ -1125,7 +1211,7 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
     (* Run length checker if enabled *)
     if config.Config.length_enabled then (
       let lengths =
-        Length.collect_length parse_ml_file module_name_of_file ~usage_tracker
+        Length.collect_length parse_ml_file module_name_of_file' ~usage_tracker
           files
       in
       let long_funcs =
