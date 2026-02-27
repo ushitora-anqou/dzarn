@@ -706,6 +706,76 @@ let () =
     (string_contains content "Comment at the end")
     true
 
+(* Test that --fix also updates .mli files *)
+let test_fix_with_mli _ =
+  with_temp_dir @@ fun tmp_dir ->
+  (* Copy both .ml and .mli files *)
+  copy_file "unused_with_mli.ml" (Filename.concat tmp_dir "unused_with_mli.ml");
+  copy_file "unused_with_mli.mli"
+    (Filename.concat tmp_dir "unused_with_mli.mli");
+
+  (* Read original .mli content to verify it has unused_public *)
+  let mli_path = Filename.concat tmp_dir "unused_with_mli.mli" in
+  let ic = open_in_bin mli_path in
+  let original_mli_content =
+    really_input_string ic (Unix.stat mli_path).st_size
+  in
+  close_in ic;
+
+  (* Verify original .mli has both functions *)
+  Alcotest.(check bool)
+    "original .mli has unused_public"
+    (string_contains original_mli_content "unused_public")
+    true;
+  Alcotest.(check bool)
+    "original .mli has used_public"
+    (string_contains original_mli_content "used_public")
+    true;
+
+  (* Run the analyzer with --fix *)
+  let _ = run_analyzer ~fix:true tmp_dir in
+
+  (* Read the fixed .mli file *)
+  let ic = open_in_bin mli_path in
+  let fixed_mli_content = really_input_string ic (Unix.stat mli_path).st_size in
+  close_in ic;
+
+  (* Check that unused_public was removed from .mli *)
+  Alcotest.(check bool)
+    "unused_public removed from .mli"
+    (not (string_contains fixed_mli_content "unused_public"))
+    true;
+
+  (* Check that used_public is still in .mli *)
+  Alcotest.(check bool)
+    "used_public still in .mli"
+    (string_contains fixed_mli_content "used_public")
+    true;
+
+  (* Also check the .ml file *)
+  let ml_path = Filename.concat tmp_dir "unused_with_mli.ml" in
+  let ic = open_in_bin ml_path in
+  let fixed_ml_content = really_input_string ic (Unix.stat ml_path).st_size in
+  close_in ic;
+
+  (* Check that unused_public was removed from .ml *)
+  Alcotest.(check bool)
+    "unused_public removed from .ml"
+    (not (string_contains fixed_ml_content "unused_public"))
+    true;
+
+  (* Check that used_public is still in .ml *)
+  Alcotest.(check bool)
+    "used_public still in .ml"
+    (string_contains fixed_ml_content "used_public")
+    true;
+
+  (* Check that private_func is still in .ml (not in .mli, so not affected) *)
+  Alcotest.(check bool)
+    "private_func still in .ml"
+    (string_contains fixed_ml_content "private_func")
+    true
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -776,6 +846,8 @@ let () =
           test_case "preserves comments when fixing" `Quick
             test_fix_preserve_comments;
         ] );
+      ( "Fix with .mli files",
+        [ test_case "removes signatures from .mli" `Quick test_fix_with_mli ] );
       ( "Multi-directory support",
         [
           test_case "detects cross-directory usage" `Quick

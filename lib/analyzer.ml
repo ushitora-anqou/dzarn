@@ -166,6 +166,29 @@ let collect_mli_signatures mli_files =
     mli_files;
   !sigs
 
+(* Collect public function signatures from .mli files with location information *)
+let collect_mli_signatures_with_loc mli_files : Types.mli_signature list =
+  let sigs = ref [] in
+  List.iter
+    (fun file ->
+      match parse_mli_file file with
+      | Error _ -> ()
+      | Ok ast ->
+          let mod_name = module_name_of_file file in
+          List.iter
+            (fun item ->
+              match item.Ppxlib.Parsetree.psig_desc with
+              | Ppxlib.Parsetree.Psig_value
+                  { pval_name = { txt = name; _ }; pval_loc = val_loc; _ } ->
+                  sigs :=
+                    Types.make_mli_signature ~module_name:mod_name ~name
+                      ~loc:(loc_of_location val_loc) ~mli_file:file
+                    :: !sigs
+              | _ -> ())
+            ast)
+    mli_files;
+  !sigs
+
 (* Function definition collector - simple traversal *)
 let collect_function_definitions files =
   let functions = ref [] in
@@ -627,6 +650,70 @@ let apply_fix_preserve_comments (file : string) (unused : Types.func_def list) :
 let apply_fix (file : string) (unused_funcs : Types.func_def list) : unit =
   apply_fix_preserve_comments file unused_funcs
 
+(* Apply fix to .mli file - removes unused signatures *)
+let apply_fix_to_mli (mli_file : string) (unused_names : StringSet.t) : unit =
+  match parse_mli_file mli_file with
+  | Error _ -> ()
+  | Ok ast ->
+      (* Collect location ranges of signatures to remove *)
+      let removed_locs = ref [] in
+      List.iter
+        (fun item ->
+          match item.Ppxlib.Parsetree.psig_desc with
+          | Ppxlib.Parsetree.Psig_value
+              { pval_name = { txt = name; _ }; pval_loc = loc; _ } ->
+              if StringSet.mem name unused_names then
+                removed_locs := get_loc_range loc :: !removed_locs
+          | _ -> ())
+        ast;
+
+      if !removed_locs <> [] then (
+        (* Read the original source code *)
+        let ic = open_in mli_file in
+        let rec read_lines acc =
+          try
+            let line = input_line ic in
+            read_lines (line :: acc)
+          with End_of_file -> List.rev acc
+        in
+        let lines = read_lines [] in
+        close_in ic;
+
+        (* Sort removal ranges by end line in descending order *)
+        let sorted_removals =
+          List.sort
+            (fun a b ->
+              compare b.Types.end_line a.Types.end_line |> fun cmp ->
+              if cmp <> 0 then cmp
+              else compare b.Types.start_line a.Types.start_line)
+            !removed_locs
+        in
+
+        (* Track which lines to remove *)
+        let lines_to_remove = ref StringSet.empty in
+        List.iter
+          (fun loc ->
+            for i = loc.Types.start_line to loc.Types.end_line do
+              lines_to_remove :=
+                StringSet.add (string_of_int i) !lines_to_remove
+            done)
+          sorted_removals;
+
+        (* Filter out removed lines *)
+        let new_lines =
+          List.mapi
+            (fun i line ->
+              if StringSet.mem (string_of_int (i + 1)) !lines_to_remove then []
+              else [ line ])
+            lines
+          |> List.concat
+        in
+
+        (* Write back to file *)
+        let oc = open_out mli_file in
+        List.iter (fun line -> output_string oc (line ^ "\n")) new_lines;
+        close_out oc)
+
 (* Main run function with config *)
 let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
   let files = find_ocaml_files_in_dirs dirs in
@@ -686,7 +773,26 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
             [] unused
         in
 
-        List.iter (fun (file, defs) -> apply_fix file defs) by_file;
+        List.iter
+          (fun (file, defs) ->
+            (* Apply fix to .ml file *)
+            apply_fix file defs;
+
+            (* Apply fix to corresponding .mli file if it exists *)
+            let mli_file =
+              let base = Filename.chop_extension (Filename.basename file) in
+              let dir = Filename.dirname file in
+              Filename.concat dir (base ^ ".mli")
+            in
+            if Sys.file_exists mli_file then
+              let unused_names =
+                List.fold_left
+                  (fun acc (def : Types.func_def) ->
+                    StringSet.add def.Types.id.name acc)
+                  StringSet.empty defs
+              in
+              apply_fix_to_mli mli_file unused_names)
+          by_file;
         if not json_output then
           Printf.printf "Fixed %d file(s).\n" (List.length by_file);
         flush stdout));

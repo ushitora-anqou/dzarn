@@ -61,6 +61,15 @@ type unused_nolint = {
 type unused_nolint_result = { unused_suppressions : unused_nolint list }
 [@@deriving yojson, show, eq, make]
 
+(* .mli signature with location information for fix support *)
+type mli_signature = {
+  module_name : string;
+  name : string;
+  loc : loc;
+  mli_file : string;
+}
+[@@deriving show, make]
+
 (* JSON output types *)
 type json_issue = {
   issue_type : string; (* "unused_function", "complexity", "naming", "length" *)
