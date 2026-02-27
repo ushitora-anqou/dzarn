@@ -196,59 +196,23 @@ let process_ident usages mod_name file longident =
                  ~loc:(Types.make_loc ~file ~line:0 ~column:0))
             ~is_public:true ~source_file:file
           :: !usages
-  | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot _; _ } ->
+  | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, func_name); _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      (* Use Location to extract the text and parse it *)
-      let longident_text =
-        let start = longident.Ppxlib.Location.loc.Ppxlib.Location.loc_start in
-        let end_ = longident.Ppxlib.Location.loc.Ppxlib.Location.loc_end in
-        (* Read from file to get the actual text *)
-        let ic = open_in file in
-        try
-          (* Seek to start position *)
-          for _i = 1 to start.pos_lnum - 1 do
-            ignore (input_line ic)
-          done;
-          (* Read the line and extract the identifier *)
-          let line = input_line ic in
-          let start_col = start.pos_cnum - start.pos_bol in
-          let end_col = end_.pos_cnum - end_.pos_bol in
-          let text = String.sub line start_col (end_col - start_col) in
-          close_in ic;
-          text
-        with _ ->
-          close_in ic;
-          (* Fallback to empty string if there's an error *)
-          ""
-      in
-      (* Parse the longident text to get module and function name *)
-      let last_dot_index =
-        let rec find_from i =
-          if i < 0 then -1
-          else if longident_text.[i] = '.' then i
-          else find_from (i - 1)
-        in
-        find_from (String.length longident_text - 1)
-      in
-      if last_dot_index >= 0 then
-        let actual_module = String.sub longident_text 0 last_dot_index in
-        let func_name =
-          String.sub longident_text (last_dot_index + 1)
-            (String.length longident_text - last_dot_index - 1)
-        in
-        (* Track the usage with the actual module being called *)
-        usages :=
-          Types.make_func_def
-            ~id:
-              (Types.make_func_id ~module_name:actual_module ~name:func_name
-                 ~loc:(Types.make_loc ~file ~line:0 ~column:0))
-            ~is_public:true ~source_file:file
-          :: !usages
+      let module_name = longident_to_string prefix in
+      (* Track the usage with the actual module being called *)
+      usages :=
+        Types.make_func_def
+          ~id:
+            (Types.make_func_id ~module_name ~name:func_name
+               ~loc:(Types.make_loc ~file ~line:0 ~column:0))
+          ~is_public:true ~source_file:file
+        :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Lapply _; _ } -> ()
 
 (* Usage tracker - simple recursive traversal *)
 let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
     unit =
+  (* Printf.eprintf "DEBUG: collect_expr in %s (mod=%s)\n%!" file mod_name; *)
   match expr.Ppxlib.Parsetree.pexp_desc with
   | Ppxlib.Parsetree.Pexp_ident longident ->
       process_ident usages mod_name file longident
@@ -289,6 +253,15 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
                 c.Ppxlib.Parsetree.pc_guard;
               collect_expr usages mod_name file c.Ppxlib.Parsetree.pc_rhs)
             cases)
+  | Ppxlib.Parsetree.Pexp_match (e, cases) ->
+      collect_expr usages mod_name file e;
+      List.iter
+        (fun c ->
+          Option.iter
+            (collect_expr usages mod_name file)
+            c.Ppxlib.Parsetree.pc_guard;
+          collect_expr usages mod_name file c.Ppxlib.Parsetree.pc_rhs)
+        cases
   | Ppxlib.Parsetree.Pexp_apply (e, args) ->
       collect_expr usages mod_name file e;
       List.iter (fun (_, arg) -> collect_expr usages mod_name file arg) args

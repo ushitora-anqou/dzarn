@@ -379,7 +379,26 @@ let test_qualified_module_call () =
     else failwith "helper should be reported as unused"
   else failwith "record should be reported as unused"
 
-(* Test 17: Naming convention violations *)
+(* Test 17: Qualified call to library module *)
+(* Bug: Module.func calls to library functions are not properly tracked *)
+let test_qualified_call_to_lib () =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "qualified_call_to_lib.ml"
+    (Filename.concat tmp_dir "qualified_call_to_lib.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* Lib.library_helper and Lib.another_func are used via qualified calls *)
+  (* They should NOT be reported as unused *)
+  if string_contains output "Unused function 'library_helper'" then
+    failwith
+      "library_helper should NOT be reported as unused (called via \
+       Lib.library_helper)"
+  else if string_contains output "Unused function 'another_func'" then
+    failwith
+      "another_func should NOT be reported as unused (called via \
+       Lib.another_func)"
+  else ()
+
+(* Test 18: Naming convention violations *)
 let test_naming_violations () =
   with_temp_dir @@ fun tmp_dir ->
   copy_file "naming_violations.ml"
@@ -636,8 +655,10 @@ let () =
       ( "All AST nodes",
         [ test_case "complete Parsetree coverage" `Quick test_all_ast_nodes ] );
       ( "Qualified module calls",
-        [ test_case "Module.function syntax" `Quick test_qualified_module_call ]
-      );
+        [
+          test_case "Module.function syntax" `Quick test_qualified_module_call;
+          test_case "call to library module" `Quick test_qualified_call_to_lib;
+        ] );
       ( "Naming convention violations",
         [ test_case "detects bad names" `Quick test_naming_violations ] );
       ( "Valid naming",
