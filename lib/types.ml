@@ -2,6 +2,16 @@
 type loc = { file : string; line : int; column : int }
 [@@deriving yojson, show, eq, make]
 
+(* Location range for text-based deletion *)
+type loc_range = {
+  file : string;
+  start_line : int;
+  end_line : int;
+  start_char : int;
+  end_char : int;
+}
+[@@deriving show, make]
+
 (* Function identifier *)
 type func_id = { module_name : string; name : string; loc : loc }
 [@@deriving yojson, show, eq, make]

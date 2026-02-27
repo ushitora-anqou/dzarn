@@ -508,6 +508,97 @@ let test_json_output_no_issues () =
       | _ -> failwith "Expected summary object")
   | _ -> failwith "Expected JSON object"
 
+(* Test that --fix preserves comments *)
+let test_fix_preserve_comments _ =
+  with_temp_dir @@ fun tmp_dir ->
+  (* Create a test file with comments and unused functions *)
+  let test_file = Filename.concat tmp_dir "test.ml" in
+  let oc = open_out test_file in
+  output_string oc
+    {|
+(* Module-level comment *)
+let used_function x = x + 1
+
+(** Unused function with documentation comment *)
+let unused_function x = x * 2
+
+(* Another unused function *)
+let another_unused x = x - 1
+
+(* This function is used *)
+let another_used x = used_function x
+
+(* Comment at the end *)
+let final_function x = x + 10
+
+(* Entry point that uses the functions *)
+let () =
+  let _ = used_function 1 in
+  let _ = another_used 2 in
+  let _ = final_function 3 in
+  ()
+|};
+  close_out oc;
+
+  (* Run the analyzer to find unused functions *)
+  let config = Dzarn.Config.default in
+  let exit_code =
+    Dzarn.Analyzer.run ~fix:true ~config ~json_output:false tmp_dir
+  in
+
+  (* Check that unused functions were detected *)
+  Alcotest.(check int) "exit code is 1 (issues found)" 1 exit_code;
+
+  (* Read the fixed file *)
+  let ic = open_in test_file in
+  let rec read_lines acc =
+    try
+      let line = input_line ic in
+      read_lines (line :: acc)
+    with End_of_file -> List.rev acc
+  in
+  let lines = read_lines [] in
+  close_in ic;
+
+  (* Check that unused functions were removed *)
+  let content = String.concat "\n" lines in
+  Alcotest.(check bool)
+    "unused_function removed"
+    (not (string_contains content "unused_function"))
+    true;
+  Alcotest.(check bool)
+    "another_unused removed"
+    (not (string_contains content "another_unused"))
+    true;
+
+  (* Check that used functions are still present *)
+  Alcotest.(check bool)
+    "used_function present"
+    (string_contains content "used_function")
+    true;
+  Alcotest.(check bool)
+    "another_used present"
+    (string_contains content "another_used")
+    true;
+  Alcotest.(check bool)
+    "final_function present"
+    (string_contains content "final_function")
+    true;
+
+  (* Check that comments were preserved *)
+  Alcotest.(check bool)
+    "module-level comment preserved"
+    (string_contains content "Module-level comment")
+    true;
+  Alcotest.(check bool)
+    "function-used comment preserved"
+    (string_contains content "This function is used")
+    true;
+  Alcotest.(check bool)
+    "end comment preserved"
+    (string_contains content "Comment at the end")
+    true
+
 let () =
   let open Alcotest in
   run "dzarn"
@@ -570,5 +661,10 @@ let () =
         [
           test_case "contains all issues" `Quick test_json_output;
           test_case "no issues" `Quick test_json_output_no_issues;
+        ] );
+      ( "Fix with comment preservation",
+        [
+          test_case "preserves comments when fixing" `Quick
+            test_fix_preserve_comments;
         ] );
     ]

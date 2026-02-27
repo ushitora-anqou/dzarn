@@ -487,14 +487,26 @@ let print_structure out_channel ast =
   let pp = Format.formatter_of_out_channel out_channel in
   Ppxlib.Pprintast.structure pp ast
 
-(* Remove unused functions - simple recursive filtering *)
-let remove_unused_functions (unused : Types.func_def list)
-    (ast : Ppxlib.Parsetree.structure) : Ppxlib.Parsetree.structure =
+(* Get location range from Ppxlib.Location.t *)
+let get_loc_range (loc : Ppxlib.Location.t) : Types.loc_range =
+  let start = loc.Ppxlib.Location.loc_start in
+  let end_ = loc.Ppxlib.Location.loc_end in
+  Types.make_loc_range ~file:start.pos_fname ~start_line:start.pos_lnum
+    ~end_line:end_.pos_lnum
+    ~start_char:(start.pos_cnum - start.pos_bol)
+    ~end_char:(end_.pos_cnum - end_.pos_bol)
+
+(* Remove unused functions and collect location ranges for text-based deletion *)
+let remove_unused_functions_with_loc (unused : Types.func_def list)
+    (ast : Ppxlib.Parsetree.structure) :
+    Ppxlib.Parsetree.structure * Types.loc_range list =
   let unused_set =
     List.fold_left
       (fun acc (def : Types.func_def) -> StringSet.add def.Types.id.name acc)
       StringSet.empty unused
   in
+
+  let removed_locs = ref [] in
 
   let rec filter_structure = function
     | [] -> []
@@ -502,20 +514,25 @@ let remove_unused_functions (unused : Types.func_def list)
         let should_keep, new_desc =
           match item.Ppxlib.Parsetree.pstr_desc with
           | Ppxlib.Parsetree.Pstr_value (rf, bindings) ->
-              let filtered =
-                List.filter
-                  (fun binding ->
+              let filtered, removed =
+                List.fold_left
+                  (fun (acc_bindings, acc_locs) binding ->
                     match
                       binding.Ppxlib.Parsetree.pvb_pat
                         .Ppxlib.Parsetree.ppat_desc
                     with
                     | Ppxlib.Parsetree.Ppat_var { txt = name; _ } ->
-                        not (StringSet.mem name unused_set)
-                    | _ -> true)
-                  bindings
+                        if StringSet.mem name unused_set then
+                          ( acc_bindings,
+                            get_loc_range binding.Ppxlib.Parsetree.pvb_loc
+                            :: acc_locs )
+                        else (binding :: acc_bindings, acc_locs)
+                    | _ -> (binding :: acc_bindings, acc_locs))
+                  ([], []) bindings
               in
+              removed_locs := !removed_locs @ List.rev removed;
               if filtered = [] then (false, Ppxlib.Parsetree.Pstr_value (rf, []))
-              else (true, Ppxlib.Parsetree.Pstr_value (rf, filtered))
+              else (true, Ppxlib.Parsetree.Pstr_value (rf, List.rev filtered))
           | other -> (true, other)
         in
         if should_keep then
@@ -523,20 +540,76 @@ let remove_unused_functions (unused : Types.func_def list)
         else filter_structure rest
   in
 
-  filter_structure ast
+  let result = filter_structure ast in
+  (result, List.rev !removed_locs)
 
-(* Apply fix to a file *)
-let apply_fix (file : string) (unused : Types.func_def list) : unit =
+(* Remove unused functions - simple recursive filtering *)
+let remove_unused_functions (unused : Types.func_def list)
+    (ast : Ppxlib.Parsetree.structure) : Ppxlib.Parsetree.structure =
+  fst (remove_unused_functions_with_loc unused ast)
+
+(* Apply fix while preserving comments using text-based deletion *)
+let apply_fix_preserve_comments (file : string) (unused : Types.func_def list) :
+    unit =
   match parse_ml_file file with
   | Error _ -> ()
   | Ok ast ->
-      let new_ast = remove_unused_functions unused ast in
-      (* Write back to file *)
-      let oc = open_out file in
-      let pp = Format.formatter_of_out_channel oc in
-      Ppxlib.Pprintast.structure pp new_ast;
-      Format.pp_print_flush pp ();
-      close_out oc
+      (* Get the location ranges of items to remove *)
+      let _, removed_locs = remove_unused_functions_with_loc unused ast in
+      if removed_locs = [] then ()
+      else
+        (* Read the original source code *)
+        let ic = open_in file in
+        let rec read_lines acc =
+          try
+            let line = input_line ic in
+            read_lines (line :: acc)
+          with End_of_file -> List.rev acc
+        in
+        let lines = read_lines [] in
+        close_in ic;
+
+        (* Sort removal ranges by end line in descending order (remove from back) *)
+        let sorted_removals =
+          List.sort
+            (fun a b ->
+              compare b.Types.end_line a.Types.end_line
+              |>
+              (* secondary sort by start line descending *)
+              fun cmp ->
+              if cmp <> 0 then cmp
+              else compare b.Types.start_line a.Types.start_line)
+            removed_locs
+        in
+
+        (* Track which lines to remove *)
+        let lines_to_remove = ref StringSet.empty in
+        List.iter
+          (fun loc ->
+            for i = loc.Types.start_line to loc.Types.end_line do
+              lines_to_remove :=
+                StringSet.add (string_of_int i) !lines_to_remove
+            done)
+          sorted_removals;
+
+        (* Filter out removed lines *)
+        let new_lines =
+          List.mapi
+            (fun i line ->
+              if StringSet.mem (string_of_int (i + 1)) !lines_to_remove then []
+              else [ line ])
+            lines
+          |> List.concat
+        in
+
+        (* Write back to file *)
+        let oc = open_out file in
+        List.iter (fun line -> output_string oc (line ^ "\n")) new_lines;
+        close_out oc
+
+(* Apply fix to a file *)
+let apply_fix (file : string) (unused_funcs : Types.func_def list) : unit =
+  apply_fix_preserve_comments file unused_funcs
 
 (* Main run function with config *)
 let run ~fix ~config ?(json_output = config.Config.json_output) dir =
@@ -588,15 +661,13 @@ let run ~fix ~config ?(json_output = config.Config.json_output) dir =
 
       if fix then (
         (* Group unused by source file *)
-        let by_file =
+        let by_file : (string * Types.func_def list) list =
           List.fold_left
-            (fun (acc : (string * Types.func_def list) list)
-                 (def : Types.func_def) ->
+            (fun acc (def : Types.func_def) ->
               let key = def.Types.source_file in
               let defs = try List.assoc key acc with Not_found -> [] in
               (key, def :: defs) :: List.remove_assoc key acc)
-            ([] : (string * Types.func_def list) list)
-            unused
+            [] unused
         in
 
         List.iter (fun (file, defs) -> apply_fix file defs) by_file;
