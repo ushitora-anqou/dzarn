@@ -771,6 +771,59 @@ let local_func () = ()
   if string_contains output "Unused function 'unused'" then ()
   else failwith "unused should be reported as unused"
 
+(* Test that let* syntax with opened modules correctly tracks function usage *)
+let test_letop_with_open _ =
+  with_temp_dir @@ fun tmp_dir ->
+  copy_file "letop_with_pipe.ml" (Filename.concat tmp_dir "letop_with_pipe.ml");
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* wrap_error and another_func should NOT be reported as unused *)
+  if string_contains output "Unused function 'wrap_error'" then
+    failwith "wrap_error should NOT be reported as unused (used via let-star)"
+  else if string_contains output "Unused function 'another_func'" then
+    failwith "another_func should NOT be reported as unused (used via let-star)"
+    (* unused_function should be reported as unused *)
+  else if string_contains output "Unused function 'unused_function'" then ()
+  else failwith "unused_function should be reported as unused"
+
+(* Test that let* syntax correctly tracks cross-file usage *)
+let test_letop_cross_file _ =
+  with_temp_dir @@ fun tmp_dir ->
+  (* Create test directory structure *)
+  let test_dir = Filename.concat tmp_dir "test" in
+  Unix.mkdir test_dir 0o755;
+
+  (* Create bar.ml *)
+  let bar_ml = Filename.concat test_dir "bar.ml" in
+  let oc = open_out bar_ml in
+  output_string oc {|
+let hoge () = Ok ()
+let unused () = ()
+|};
+  close_out oc;
+
+  (* Create foo.ml *)
+  let foo_ml = Filename.concat test_dir "foo.ml" in
+  let oc = open_out foo_ml in
+  output_string oc
+    {|
+open Bar
+
+let f () = ()
+
+let () =
+  let* x = f () |> hoge in
+  Ok ()
+|};
+  close_out oc;
+
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* hoge should NOT be reported as unused (used in foo.ml via let star) *)
+  if not (string_contains output "Unused function 'hoge'") then ()
+  else failwith "hoge should not be reported as unused";
+  (* unused should be reported as unused *)
+  if string_contains output "Unused function 'unused'" then ()
+  else failwith "unused should be reported as unused"
+
 (* Test that --fix also updates .mli files *)
 let test_fix_with_mli _ =
   with_temp_dir @@ fun tmp_dir ->
@@ -923,6 +976,11 @@ let () =
       ( "Pipe operator with opened modules",
         [
           test_case "tracks usage correctly" `Quick test_pipe_operator_with_open;
+        ] );
+      ( "Let* syntax with opened modules",
+        [
+          test_case "tracks usage correctly" `Quick test_letop_with_open;
+          test_case "handles cross-file let*" `Quick test_letop_cross_file;
         ] );
       ( "Multi-directory support",
         [

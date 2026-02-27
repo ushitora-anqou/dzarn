@@ -451,7 +451,19 @@ let rec collect_expr_with_open usages open_ctx file
       collect_expr_with_open usages open_ctx file e
   | Ppxlib.Parsetree.Pexp_object _ -> ()
   | Ppxlib.Parsetree.Pexp_pack _ -> ()
-  | Ppxlib.Parsetree.Pexp_letop _ -> ()
+  | Ppxlib.Parsetree.Pexp_letop letop ->
+      (* Process let* / let+ / and* binding expressions *)
+      (* Main binding: let* x = <expr> in ... *)
+      collect_expr_with_open usages open_ctx file
+        letop.Ppxlib.Parsetree.let_.Ppxlib.Parsetree.pbop_exp;
+      (* Additional bindings: and* y = <expr> ... *)
+      List.iter
+        (fun binding_op ->
+          collect_expr_with_open usages open_ctx file
+            binding_op.Ppxlib.Parsetree.pbop_exp)
+        letop.Ppxlib.Parsetree.ands;
+      (* Body expression: ... in <body> *)
+      collect_expr_with_open usages open_ctx file letop.Ppxlib.Parsetree.body
   | Ppxlib.Parsetree.Pexp_constant _ -> ()
   | Ppxlib.Parsetree.Pexp_open (open_decl, e) ->
       (* Local open: let open Module in expr or Module.(expr) *)
@@ -571,7 +583,15 @@ let rec collect_expr usages mod_name file (expr : Ppxlib.Parsetree.expression) :
   | Ppxlib.Parsetree.Pexp_pack _ ->
       (* Skip module pack for now *)
       ()
-  | Ppxlib.Parsetree.Pexp_letop _ -> ()
+  | Ppxlib.Parsetree.Pexp_letop letop ->
+      (* Process let* / let+ / and* binding expressions *)
+      collect_expr usages mod_name file
+        letop.Ppxlib.Parsetree.let_.Ppxlib.Parsetree.pbop_exp;
+      List.iter
+        (fun binding_op ->
+          collect_expr usages mod_name file binding_op.Ppxlib.Parsetree.pbop_exp)
+        letop.Ppxlib.Parsetree.ands;
+      collect_expr usages mod_name file letop.Ppxlib.Parsetree.body
   | Ppxlib.Parsetree.Pexp_constant _ -> ()
   | Ppxlib.Parsetree.Pexp_open (_, e) -> collect_expr usages mod_name file e
   | Ppxlib.Parsetree.Pexp_extension (_, _) -> ()
