@@ -17,7 +17,14 @@ let config_file =
   Arg.(
     value & opt string "dzarn.sexp" & info [ "c"; "config" ] ~docv:"FILE" ~doc)
 
-let run dir fix config_path verbose json =
+let dirs =
+  let doc = "Directories to analyze" in
+  Arg.(value & pos_all string [] & info [] ~docv:"DIRS" ~doc)
+
+let run dirs fix config_path verbose json =
+  if dirs = [] then (
+    Printf.eprintf "Error: At least one directory must be specified\n";
+    exit 1);
   (* Setup logging based on verbose flag *)
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (if verbose then Some Debug else None);
@@ -32,16 +39,15 @@ let run dir fix config_path verbose json =
         Dzarn.Config.default)
     else Dzarn.Config.default
   in
-  Dzarn.Analyzer.run ~fix ~config ~json_output:json dir
+  Dzarn.Analyzer.run ~fix ~config ~json_output:json dirs
 
 let main () =
   Cmd.(
     v (info "dzarn")
       Term.(
-        const (fun dir fix config_path verbose json ->
-            exit (run dir fix config_path verbose json))
-        $ Arg.(required & pos 0 (some string) None & info ~docv:"DIR" [])
-        $ fix $ config_file $ verbose $ json))
+        const (fun dirs fix config_path verbose json ->
+            exit (run dirs fix config_path verbose json))
+        $ dirs $ fix $ config_file $ verbose $ json))
   |> Cmd.eval ~catch:false
 
 let () = ignore (main ())

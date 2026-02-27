@@ -52,7 +52,7 @@ let run_analyzer ~config tmp_dir =
   let old_stdout = Unix.dup Unix.stdout in
   Unix.dup2 (Unix.descr_of_out_channel oc) Unix.stdout;
   let code =
-    try Dzarn.Analyzer.run ~fix:false ~config tmp_dir
+    try Dzarn.Analyzer.run ~fix:false ~config [ tmp_dir ]
     with e ->
       flush stdout;
       Unix.dup2 old_stdout Unix.stdout;

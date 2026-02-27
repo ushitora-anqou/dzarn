@@ -24,6 +24,13 @@ let rec longident_to_string : Ppxlib.Longident.t -> string = function
   | Ppxlib.Longident.Ldot (prefix, s) -> longident_to_string prefix ^ "." ^ s
   | Ppxlib.Longident.Lapply _ -> ""
 
+(* Get the last identifier from a Longident.t *)
+(* For Dzarn.Config, returns "Config" *)
+let last_ident_of_longident : Ppxlib.Longident.t -> string = function
+  | Ppxlib.Longident.Lident s -> s
+  | Ppxlib.Longident.Ldot (_, s) -> s
+  | Ppxlib.Longident.Lapply _ -> ""
+
 (* File discovery *)
 let find_ocaml_files dir =
   let files = ref [] in
@@ -49,6 +56,41 @@ let find_ocaml_files dir =
     with Sys_error _ -> ()
   in
   traverse dir;
+  List.rev !files
+
+(* Find OCaml files in multiple directories with deduplication *)
+let find_ocaml_files_in_dirs dirs =
+  let files = ref [] in
+  let seen = ref StringSet.empty in
+  let rec traverse dir =
+    try
+      let entries = Sys.readdir dir in
+      Array.iter
+        (fun entry ->
+          let path = Filename.concat dir entry in
+          (* Skip _build and _dune directories *)
+          if entry <> "_build" && entry <> "_dune" then
+            try
+              if Sys.is_directory path then
+                if
+                  entry <> "."
+                  && (not (String.starts_with ~prefix:"." entry))
+                  && not (String.starts_with ~prefix:"systemd" entry)
+                then traverse path
+                else ()
+              else if
+                Filename.check_suffix entry ".ml"
+                || Filename.check_suffix entry ".mli"
+              then
+                (* Deduplicate files *)
+                if not (StringSet.mem path !seen) then (
+                  files := path :: !files;
+                  seen := StringSet.add path !seen)
+            with Sys_error _ -> ())
+        entries
+    with Sys_error _ -> ()
+  in
+  List.iter traverse dirs;
   List.rev !files
 
 (* Location conversion from Location.t to our loc type *)
@@ -198,7 +240,8 @@ let process_ident usages mod_name file longident =
           :: !usages
   | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, func_name); _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      let module_name = longident_to_string prefix in
+      (* Use the last component of the module path to match module_name_of_file *)
+      let module_name = last_ident_of_longident prefix in
       (* Track the usage with the actual module being called *)
       usages :=
         Types.make_func_def
@@ -585,10 +628,10 @@ let apply_fix (file : string) (unused_funcs : Types.func_def list) : unit =
   apply_fix_preserve_comments file unused_funcs
 
 (* Main run function with config *)
-let run ~fix ~config ?(json_output = config.Config.json_output) dir =
-  let files = find_ocaml_files dir in
+let run ~fix ~config ?(json_output = config.Config.json_output) dirs =
+  let files = find_ocaml_files_in_dirs dirs in
   if files = [] then (
-    Printf.printf "No OCaml files found in %s\n" dir;
+    Printf.printf "No OCaml files found in: %s\n" (String.concat ", " dirs);
     flush stdout;
     0)
   else

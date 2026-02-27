@@ -111,7 +111,56 @@ let run_analyzer ~fix ?(json_output = false) dir =
     Unix.dup2 (Unix.descr_of_out_channel oc) Unix.stdout;
     let config = Dzarn.Config.default in
     let code =
-      try Dzarn.Analyzer.run ~fix ~config ~json_output dir
+      try Dzarn.Analyzer.run ~fix ~config ~json_output [ dir ]
+      with e ->
+        flush stdout;
+        Unix.dup2 old_stdout Unix.stdout;
+        Unix.close old_stdout;
+        close_out oc;
+        raise e
+    in
+    flush stdout;
+    Unix.dup2 old_stdout Unix.stdout;
+    Unix.close old_stdout;
+    close_out oc;
+    code
+  in
+
+  (* Read output from file *)
+  let output =
+    let ic = open_in output_file in
+    let rec read_all acc =
+      try
+        let line = input_line ic in
+        read_all (acc ^ line ^ "\n")
+      with End_of_file -> acc
+    in
+    let result = read_all "" in
+    close_in ic;
+    result
+  in
+  (try Sys.remove output_file with _ -> ());
+  (exit_code, output)
+
+(* Helper to capture output from Analyzer.run on multiple directories *)
+let run_analyzer_on_dirs ~fix ?(json_output = false) dirs =
+  (* Use the first directory as the base for output file *)
+  let base_dir =
+    match dirs with
+    | [] -> failwith "run_analyzer_on_dirs: at least one directory required"
+    | d :: _ -> d
+  in
+  let output_file = Filename.concat base_dir "analyzer_output.txt" in
+  (* Remove any existing output file *)
+  (try Sys.remove output_file with _ -> ());
+  let exit_code =
+    (* Redirect stdout to file *)
+    let oc = open_out output_file in
+    let old_stdout = Unix.dup Unix.stdout in
+    Unix.dup2 (Unix.descr_of_out_channel oc) Unix.stdout;
+    let config = Dzarn.Config.default in
+    let code =
+      try Dzarn.Analyzer.run ~fix ~config ~json_output dirs
       with e ->
         flush stdout;
         Unix.dup2 old_stdout Unix.stdout;
@@ -360,7 +409,7 @@ let test_all_ast_nodes () =
   copy_file "all_ast_nodes.ml" (Filename.concat tmp_dir "all_ast_nodes.ml");
   (* Should parse without error - just verify no crash *)
   let config = Dzarn.Config.default in
-  let _code = Dzarn.Analyzer.run ~fix:false ~config tmp_dir in
+  let _code = Dzarn.Analyzer.run ~fix:false ~config [ tmp_dir ] in
   (* Exit code may be non-zero if there are unused functions, but that's OK *)
   (* We just want to ensure parsing succeeded *)
   ()
@@ -527,6 +576,45 @@ let test_json_output_no_issues () =
       | _ -> failwith "Expected summary object")
   | _ -> failwith "Expected JSON object"
 
+(* Test: Multi-directory usage detection *)
+let test_multi_directory_usage () =
+  with_temp_dir @@ fun tmp_dir ->
+  (* Create lib and bin subdirectories *)
+  let lib_dir = Filename.concat tmp_dir "lib" in
+  let bin_dir = Filename.concat tmp_dir "bin" in
+  Unix.mkdir lib_dir 0o755;
+  Unix.mkdir bin_dir 0o755;
+
+  (* Create lib/config.ml with functions *)
+  let config_file = Filename.concat lib_dir "config.ml" in
+  let oc = open_out config_file in
+  output_string oc {|
+let default = ()
+let parse_file file = ()
+|};
+  close_out oc;
+
+  (* Create bin/main.ml that uses Config functions *)
+  let main_file = Filename.concat bin_dir "main.ml" in
+  let oc = open_out main_file in
+  output_string oc
+    {|
+let () =
+  let _ = Config.default in
+  let _ = Config.parse_file "config.sexp" in
+  ()
+|};
+  close_out oc;
+
+  (* Run analyzer on both directories *)
+  let _, output = run_analyzer_on_dirs ~fix:false [ lib_dir; bin_dir ] in
+  (* Config.default and Config.parse_file should NOT be reported as unused *)
+  if string_contains output "Unused function 'default'" then
+    failwith "default should NOT be reported as unused (used in bin/main.ml)"
+  else if string_contains output "Unused function 'parse_file'" then
+    failwith "parse_file should NOT be reported as unused (used in bin/main.ml)"
+  else ()
+
 (* Test that --fix preserves comments *)
 let test_fix_preserve_comments _ =
   with_temp_dir @@ fun tmp_dir ->
@@ -562,7 +650,7 @@ let () =
   (* Run the analyzer to find unused functions *)
   let config = Dzarn.Config.default in
   let exit_code =
-    Dzarn.Analyzer.run ~fix:true ~config ~json_output:false tmp_dir
+    Dzarn.Analyzer.run ~fix:true ~config ~json_output:false [ tmp_dir ]
   in
 
   (* Check that unused functions were detected *)
@@ -687,5 +775,10 @@ let () =
         [
           test_case "preserves comments when fixing" `Quick
             test_fix_preserve_comments;
+        ] );
+      ( "Multi-directory support",
+        [
+          test_case "detects cross-directory usage" `Quick
+            test_multi_directory_usage;
         ] );
     ]
