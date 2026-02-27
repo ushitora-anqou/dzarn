@@ -17,10 +17,15 @@ end
 
 module UsageSet = Set.Make (UsagePair)
 
+(* Map from module name to set of function names defined in that module *)
+module ModuleFunctionMap = Map.Make (String_set_key)
+
 (* Open context for tracking opened modules *)
 (* Tracks modules opened via 'open Module' statements *)
 type open_context = {
   mutable opened_modules : StringSet.t; (* Set of opened module names *)
+  module_functions : StringSet.t StringMap.t;
+      (* Map from module name to its functions *)
   current_module : string; (* Current module being processed *)
 }
 
@@ -196,9 +201,10 @@ let collect_mli_signatures_with_loc mli_files : Types.mli_signature list =
     mli_files;
   !sigs
 
-(* Function definition collector - simple traversal *)
-let collect_function_definitions files =
+(* Collect function definitions AND build module function index *)
+let collect_function_definitions_with_index files =
   let functions = ref [] in
+  let module_index = ref StringMap.empty in
   let mli_files = List.filter (fun f -> Filename.check_suffix f ".mli") files in
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
   let mli_sigs = collect_mli_signatures mli_files in
@@ -212,6 +218,7 @@ let collect_function_definitions files =
         let mod_sigs =
           if has_mli then Some (StringMap.find mod_name mli_sigs) else None
         in
+        let module_funcs = ref StringSet.empty in
         List.iter
           (fun (item : Ppxlib.Parsetree.structure_item) ->
             match item.Ppxlib.Parsetree.pstr_desc with
@@ -228,7 +235,7 @@ let collect_function_definitions files =
                           | Some sigs -> StringSet.mem name sigs
                           | None -> not (is_private_name name)
                         in
-                        if is_public then
+                        if is_public then (
                           functions :=
                             Types.make_func_def
                               ~id:
@@ -238,14 +245,35 @@ let collect_function_definitions files =
                                         binding.Ppxlib.Parsetree.pvb_pat
                                           .Ppxlib.Parsetree.ppat_loc))
                               ~is_public:true ~source_file:file
-                            :: !functions
+                            :: !functions;
+                          module_funcs := StringSet.add name !module_funcs)
                     | _ -> ())
                   bindings
             | _ -> ())
-          ast
+          ast;
+        (* Add this module's functions to the index *)
+        module_index := StringMap.add mod_name !module_funcs !module_index
   in
   List.iter process_file ml_files;
-  List.rev !functions
+  (List.rev !functions, !module_index)
+
+(* Function definition collector - simple traversal *)
+let collect_function_definitions files =
+  fst (collect_function_definitions_with_index files)
+
+(* Resolve identifier in opened modules - returns the module name where it's defined *)
+(* Returns None if not found in any opened module *)
+(* If multiple opened modules define the same identifier, the last one wins (OCaml shadowing) *)
+let resolve_identifier_in_opened_modules identifier opened_modules
+    module_functions =
+  let modules_list = StringSet.elements opened_modules |> Stdlib.List.rev in
+  Stdlib.List.find_map
+    (fun mod_name ->
+      match StringMap.find_opt mod_name module_functions with
+      | Some function_set when StringSet.mem identifier function_set ->
+          Some mod_name
+      | _ -> None)
+    modules_list
 
 (* Helper to process identifier and record usage with open context *)
 let process_ident_with_open usages open_ctx file longident =
@@ -260,38 +288,30 @@ let process_ident_with_open usages open_ctx file longident =
         || name = "false" || name = "()" || name = "[]" || name = "[|]"
         || name = "::" || name = "::@"
       then ()
-      else if
-        (* Check if this identifier might come from an opened module *)
-        (* This is a simple heuristic: if the name matches an opened module name,
-           it likely comes from that module, not the current module *)
-        StringSet.exists
-          (fun mod_name ->
-            (* For simplicity, we assume that if an identifier name matches
-             an opened module name, it comes from that module.
-             This is a conservative approach that may have false positives
-             but prevents false negatives. *)
-            String.lowercase_ascii mod_name = String.lowercase_ascii name)
-          open_ctx.opened_modules
-      then
-        (* This identifier likely comes from an opened module,
-             don't record it as current module usage *)
-        ()
       else
-        (* Record as current module usage *)
+        (* Check if this identifier is defined in any opened module *)
+        let target_mod_name =
+          match
+            resolve_identifier_in_opened_modules name open_ctx.opened_modules
+              open_ctx.module_functions
+          with
+          | Some mn -> mn
+          | None -> open_ctx.current_module
+        in
         usages :=
           Types.make_func_def
             ~id:
-              (Types.make_func_id ~module_name:open_ctx.current_module ~name
+              (Types.make_func_id ~module_name:target_mod_name ~name
                  ~loc:(Types.make_loc ~file ~line:0 ~column:0))
             ~is_public:true ~source_file:file
           :: !usages
-  | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, func_name); _ } ->
+  | { Ppxlib.Location.txt = Ppxlib.Longident.Ldot (prefix, fname); _ } ->
       (* Qualified call: Module.func or A.B.func *)
-      let module_name = last_ident_of_longident prefix in
+      let module_name' = last_ident_of_longident prefix in
       usages :=
         Types.make_func_def
           ~id:
-            (Types.make_func_id ~module_name ~name:func_name
+            (Types.make_func_id ~module_name:module_name' ~name:fname
                ~loc:(Types.make_loc ~file ~line:0 ~column:0))
           ~is_public:true ~source_file:file
         :: !usages
@@ -615,6 +635,9 @@ let collect_usages files =
   let usages = ref [] in
   let ml_files = List.filter (fun f -> Filename.check_suffix f ".ml") files in
 
+  (* Build module function index first *)
+  let _, module_functions = collect_function_definitions_with_index files in
+
   List.iter
     (fun file ->
       match parse_ml_file file with
@@ -622,7 +645,11 @@ let collect_usages files =
       | Ok ast ->
           let mod_name = module_name_of_file file in
           let open_ctx =
-            { opened_modules = StringSet.empty; current_module = mod_name }
+            {
+              opened_modules = StringSet.empty;
+              module_functions;
+              current_module = mod_name;
+            }
           in
           collect_structure_with_open usages open_ctx file ast)
     ml_files;

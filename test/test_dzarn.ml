@@ -719,6 +719,41 @@ let test_opened_module_bug _ =
   if not (string_contains output "map is unused") then ()
   else failwith "map should not be reported as unused"
 
+(* Test that open Module correctly tracks cross-file usage *)
+let test_open_module_cross_file _ =
+  with_temp_dir @@ fun tmp_dir ->
+  (* Create test directory structure *)
+  let test_dir = Filename.concat tmp_dir "test" in
+  Unix.mkdir test_dir 0o755;
+
+  (* Create bar.ml *)
+  let bar_ml = Filename.concat test_dir "bar.ml" in
+  let oc = open_out bar_ml in
+  output_string oc {|
+let hoge () = 3
+let unused () = ()
+|};
+  close_out oc;
+
+  (* Create foo.ml *)
+  let foo_ml = Filename.concat test_dir "foo.ml" in
+  let oc = open_out foo_ml in
+  output_string oc {|
+open Bar
+
+let () = hoge ()
+let local_func () = ()
+|};
+  close_out oc;
+
+  let _, output = run_analyzer ~fix:false tmp_dir in
+  (* hoge should NOT be reported as unused (used in foo.ml) *)
+  if not (string_contains output "Unused function 'hoge'") then ()
+  else failwith "hoge should not be reported as unused";
+  (* unused should be reported as unused *)
+  if string_contains output "Unused function 'unused'" then ()
+  else failwith "unused should be reported as unused"
+
 (* Test that --fix also updates .mli files *)
 let test_fix_with_mli _ =
   with_temp_dir @@ fun tmp_dir ->
@@ -865,6 +900,8 @@ let () =
         [
           test_case "handles open Module correctly" `Quick
             test_opened_module_bug;
+          test_case "handles cross-file open Module correctly" `Quick
+            test_open_module_cross_file;
         ] );
       ( "Multi-directory support",
         [
